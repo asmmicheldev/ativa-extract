@@ -1,4 +1,6 @@
 // js/db.js
+// FIX: evita VersionError para sempre mudando o "nome" do DB quando você mudar estrutura.
+// Se você mudar schema no futuro, só aumenta o sufixo: _v2, _v3, etc.
 const DB_NAME = "ativas_extract_db_v1";
 const DB_VERSION = 1;
 const STORE = "items";

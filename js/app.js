@@ -1,7 +1,7 @@
 // js/app.js
 import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
 import { parseCardHeader, parseCardChannels } from "./parsers.js";
-import { uuid, nowISO, dayKeyLocal, fmtDateTime, clampText, startOfMonth, endOfMonth, addDays } from "./utils.js";
+import { uuid, nowISO, dayKeyLocal, startOfMonth, endOfMonth, addDays, clampText } from "./utils.js";
 
 let state = {
   items: [],
@@ -13,10 +13,45 @@ let state = {
 
 const $ = (id) => document.getElementById(id);
 
-// ---------- Modal binding ----------
+// ---------- Modal state ----------
 let modalBound = false;
-let currentModalEvent = null; // { itemId, id (eventId), label, alias, at, itemName, meta... }
+let currentModalEvent = null;
+let aliasDirty = false;
+let saveTimer = null;
 
+function fmtDateOnly(d) {
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return "—";
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const yy = String(dt.getFullYear());
+  return `${dd}/${mm}/${yy}`;
+}
+
+function getDisplayName(ev) {
+  const a = (ev?.alias || "").trim();
+  if (a) return a;
+  return (ev?.label || "Push").trim();
+}
+
+function getPosFromEvent(ev) {
+  const pos = (ev?.meta?.posicaoJornada || "").trim();
+  if (pos) return pos;
+  const m = String(ev?.label || "").match(/\bP\d+\b/i);
+  return m ? m[0].toUpperCase() : "P?";
+}
+
+function getComunicacaoName(ev) {
+  const n = (ev?.meta?.nomeComunicacao || "").trim();
+  if (n) return n;
+
+  const label = String(ev?.label || "");
+  const parts = label.split("—");
+  if (parts.length >= 2) return parts.slice(1).join("—").trim();
+  return label.trim() || "—";
+}
+
+// ---------- Modal binding ----------
 function bindModalOnce() {
   if (modalBound) return;
 
@@ -24,30 +59,41 @@ function bindModalOnce() {
   const btnClose = $("modalCloseBtn");
   const backdrop = $("modalClose");
   const btnDelete = $("btnDeleteCard");
-  const btnSave = $("btnSaveAlias");
-  const aliasInput = $("aliasInput");
+  const titleEl = $("modalTitle");
 
   const missing = [];
   if (!modal) missing.push("modal");
   if (!btnClose) missing.push("modalCloseBtn");
   if (!backdrop) missing.push("modalClose");
   if (!btnDelete) missing.push("btnDeleteCard");
-  if (!btnSave) missing.push("btnSaveAlias");
-  if (!aliasInput) missing.push("aliasInput");
+  if (!titleEl) missing.push("modalTitle");
 
   if (missing.length) {
     console.error("IDs do modal não encontrados no HTML:", missing.join(", "));
     return;
   }
 
-  btnClose.addEventListener("click", closeModal);
-  backdrop.addEventListener("click", closeModal);
-
-  document.addEventListener("keydown", (e) => {
-    const modalEl = $("modal");
-    if (e.key === "Escape" && modalEl && !modalEl.classList.contains("hidden")) closeModal();
+  // fechar (salva antes)
+  btnClose.addEventListener("click", async () => {
+    await saveAliasIfDirty();
+    closeModal();
   });
 
+  backdrop.addEventListener("click", async () => {
+    await saveAliasIfDirty();
+    closeModal();
+  });
+
+  document.addEventListener("keydown", async (e) => {
+    const modalEl = $("modal");
+    if (!modalEl || modalEl.classList.contains("hidden")) return;
+    if (e.key === "Escape") {
+      await saveAliasIfDirty();
+      closeModal();
+    }
+  });
+
+  // Excluir card
   btnDelete.addEventListener("click", async () => {
     if (!currentModalEvent?.itemId) return;
     const ok = confirm("Excluir este card inteiro (todos os eventos dele)?");
@@ -58,49 +104,94 @@ function bindModalOnce() {
     await refresh();
   });
 
-  btnSave.addEventListener("click", async () => {
-    if (!currentModalEvent?.itemId || !currentModalEvent?.id) return;
+  // Auto-save: edição no título
+  titleEl.addEventListener("input", () => {
+    aliasDirty = true;
+    scheduleSave();
+  });
 
-    const alias = ($("aliasInput").value || "").trim();
-
-    const item = await dbGetItem(currentModalEvent.itemId);
-    if (!item) {
-      alert("Card não encontrado no banco local.");
-      return;
-    }
-
-    const evIndex = (item.events || []).findIndex(e => e && e.id === currentModalEvent.id);
-    if (evIndex === -1) {
-      alert("Evento não encontrado dentro do card.");
-      return;
-    }
-
-    item.events[evIndex].alias = alias;
-    item.updatedAt = nowISO();
-
-    await dbPutItem(item);
-
-    currentModalEvent.alias = alias;
-
-    await refresh();
-    closeModal();
+  // Ao sair do título: salva
+  titleEl.addEventListener("blur", async () => {
+    await saveAliasIfDirty();
   });
 
   modalBound = true;
 }
 
-function openModalBase(title, bodyText) {
+function showSaving(on) {
+  $("saveState").classList.toggle("hidden", !on);
+  if (on) $("saveOk").classList.add("hidden");
+}
+
+function showSavedOk() {
+  $("saveOk").classList.remove("hidden");
+  setTimeout(() => $("saveOk").classList.add("hidden"), 900);
+}
+
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  showSaving(true);
+  saveTimer = setTimeout(async () => {
+    await saveAliasIfDirty();
+  }, 450);
+}
+
+async function saveAliasIfDirty() {
+  if (!aliasDirty) {
+    showSaving(false);
+    return;
+  }
+  if (!currentModalEvent?.itemId || !currentModalEvent?.id) {
+    aliasDirty = false;
+    showSaving(false);
+    return;
+  }
+
+  const titleEl = $("modalTitle");
+  const newAlias = (titleEl.textContent || "").trim();
+
+  try {
+    const item = await dbGetItem(currentModalEvent.itemId);
+    if (!item) throw new Error("Card não encontrado.");
+
+    const idx = (item.events || []).findIndex(e => e && e.id === currentModalEvent.id);
+    if (idx === -1) throw new Error("Evento não encontrado no card.");
+
+    item.events[idx].alias = newAlias;
+    item.updatedAt = nowISO();
+
+    await dbPutItem(item);
+
+    currentModalEvent.alias = newAlias;
+    aliasDirty = false;
+    showSaving(false);
+    showSavedOk();
+
+    await refresh(); // atualiza o pill
+  } catch (err) {
+    console.error(err);
+    showSaving(false);
+  }
+}
+
+function openModalBase(titleText, bodyHTML) {
   bindModalOnce();
 
-  $("modalTitle").textContent = title || "—";
-  $("modalBody").textContent = bodyText || "";
+  $("modalTitle").textContent = titleText || "—";
+
+  const body = $("modalBody");
+  body.innerHTML = bodyHTML || "";
 
   const modal = $("modal");
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
 
-  $("aliasInput").value = (currentModalEvent?.alias || "").trim();
-  $("aliasInput").focus();
+  aliasDirty = false;
+  showSaving(false);
+  $("saveOk").classList.add("hidden");
+
+  // foca no título (já que editar é direto)
+  $("modalTitle").focus();
 }
 
 function closeModal() {
@@ -114,10 +205,15 @@ function closeModal() {
   modal.classList.add("hidden");
   modal.setAttribute("aria-hidden", "true");
   currentModalEvent = null;
-  if ($("aliasInput")) $("aliasInput").value = "";
+  aliasDirty = false;
+
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
 }
 
-// ---------- Calendar logic ----------
+// ---------- Calendar ----------
 function monthLabel(d) {
   return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
@@ -146,9 +242,7 @@ function collectEventsForMonth() {
     for (const ev of (it.events || [])) {
       if (!ev?.at) continue;
 
-      // Só Journey/Push no calendário
       if (ev.space !== "journey" || ev.channel !== "push") continue;
-
       if (!passesFilters(ev, itemName)) continue;
 
       const dt = new Date(ev.at);
@@ -192,16 +286,6 @@ function buildMonthGridDates(monthCursor) {
     cur = addDays(cur, 1);
   }
   return dates;
-}
-
-function pillClass() {
-  return "pill push";
-}
-
-function getDisplayName(ev) {
-  const a = (ev.alias || "").trim();
-  if (a) return a;
-  return (ev.label || "Push").trim();
 }
 
 function renderCalendar() {
@@ -251,9 +335,8 @@ function renderCalendar() {
 
     for (const ev of show) {
       const pill = document.createElement("div");
-      pill.className = pillClass(ev);
+      pill.className = "pill push";
 
-      // ✅ Macro: só o nome (alias > label). Sem descrição/linha 2.
       const t1 = document.createElement("div");
       t1.className = "t1";
       t1.textContent = clampText(getDisplayName(ev), 60);
@@ -293,41 +376,37 @@ function renderCalendar() {
 function openEventModal(ev) {
   currentModalEvent = ev;
 
-  // ✅ Título = alias (se existir) OU label (original). Sem "— journey/push".
   const title = getDisplayName(ev);
 
-  // Conteúdo fixo (originais)
-  const body =
-`Card original:
-${ev.itemName || "—"}
+  const pos = getPosFromEvent(ev);
+  const when = fmtDateOnly(ev.at);
+  const commName = getComunicacaoName(ev);
 
-Evento original:
-${ev.label || "—"}
+  // ✅ hierarquia: card maior/negrito, data muted, push normal
+  const bodyHTML =
+    `<div class="mb-journey">${escapeHTML(ev.itemName || "—")}</div>
+     <div class="mb-date">${escapeHTML(`${pos} (PUSH) - ${when}`)}</div>
+     <div class="mb-push">${escapeHTML(commName)}</div>`;
 
-Data original:
-${fmtDateTime(ev.at)}
-
-ID do evento:
-${ev.id || "—"}`;
-
-  openModalBase(title, body);
+  openModalBase(title, bodyHTML);
 }
 
 function openDayModal(dayKey, entries) {
   const d = new Date(dayKey + "T00:00:00");
   const title = d.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "2-digit" });
 
-  const lines = entries.map(ev => {
-    const hhmm = fmtDateTime(ev.at).slice(11, 16);
-    const display = getDisplayName(ev);
-    return `• ${hhmm}  ${display}\n  ${ev.itemName}`;
-  }).join("\n\n");
-
+  const lines = entries.map(ev => `• ${getDisplayName(ev)}`).join("<br/>");
   currentModalEvent = null;
   openModalBase(title, lines || "Sem eventos.");
+}
 
-  // day modal não edita alias
-  $("aliasInput").value = "";
+function escapeHTML(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 // ---------- Data / actions ----------

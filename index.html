@@ -98,23 +98,21 @@
   <div id="modal" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop" id="modalClose"></div>
 
-    <div class="modal-card" role="dialog" aria-modal="true">
-      <div class="modal-title" id="modalTitle">—</div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-top">
+        <!-- título editável = alias -->
+        <div id="modalTitle" class="modal-title-edit" contenteditable="true" spellcheck="false"></div>
 
-      <div id="modalBody" class="modal-body"></div>
-
-      <!-- input do alias por EVENTO -->
-      <div class="form-block">
-        <label class="label">Nome do bloco (manual)</label>
-        <input id="aliasInput" class="input" placeholder="Ex: XP Push 1 [Campanha PGBL sem Recorrência]" />
-        <div class="hint" style="margin-top:8px;">
-          Esse nome substitui só este bloquinho (este evento/push). Não altera outros pushes do mesmo card.
+        <div class="modal-save">
+          <span id="saveState" class="save-state hidden">Salvando…</span>
+          <span id="saveOk" class="save-ok hidden">✓</span>
         </div>
       </div>
 
+      <div id="modalBody" class="modal-body compact"></div>
+
       <div class="modal-actions">
         <button id="btnDeleteCard" class="btn btn-danger" type="button">Excluir card</button>
-        <button id="btnSaveAlias" class="btn btn-primary" type="button">Salvar nome</button>
         <button id="modalCloseBtn" class="btn btn-secondary" type="button">Fechar</button>
       </div>
     </div>
