@@ -1,7 +1,7 @@
+// js/db.js
 const DB_NAME = "ativas_extract_db";
-const DB_VERSION = 2; // bump (mudou schema)
+const DB_VERSION = 5; // IMPORTANTE: precisa ser >= versão já existente no navegador
 const STORE = "items";
-const META = "meta";
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -10,18 +10,13 @@ function openDB() {
     req.onupgradeneeded = () => {
       const db = req.result;
 
-      // recria store se precisar (migração simples)
+      // garante store
       if (db.objectStoreNames.contains(STORE)) {
+        // se você quer manter simples e evitar migração agora:
+        // recria do zero quando muda schema
         db.deleteObjectStore(STORE);
       }
-      const s = db.createObjectStore(STORE, { keyPath: "id" });
-      s.createIndex("updatedAt", "updatedAt");
-      s.createIndex("archived", "archived");
-      s.createIndex("alwaysOn", "alwaysOn");
-
-      if (!db.objectStoreNames.contains(META)) {
-        db.createObjectStore(META, { keyPath: "key" });
-      }
+      db.createObjectStore(STORE, { keyPath: "id" });
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -29,14 +24,14 @@ function openDB() {
   });
 }
 
-function tx(db, storeName, mode = "readonly") {
-  return db.transaction(storeName, mode).objectStore(storeName);
+function tx(db, mode = "readonly") {
+  return db.transaction(STORE, mode).objectStore(STORE);
 }
 
 export async function dbGetAllItems() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const store = tx(db, STORE);
+    const store = tx(db);
     const req = store.getAll();
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
@@ -46,7 +41,7 @@ export async function dbGetAllItems() {
 export async function dbPutItem(item) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const store = tx(db, STORE, "readwrite");
+    const store = tx(db, "readwrite");
     const req = store.put(item);
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
@@ -56,28 +51,18 @@ export async function dbPutItem(item) {
 export async function dbDeleteItem(id) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const store = tx(db, STORE, "readwrite");
+    const store = tx(db, "readwrite");
     const req = store.delete(id);
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
   });
 }
 
-export async function dbGetMeta(key) {
+export async function dbClearAll() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const store = tx(db, META);
-    const req = store.get(key);
-    req.onsuccess = () => resolve(req.result?.value ?? null);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export async function dbSetMeta(key, value) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const store = tx(db, META, "readwrite");
-    const req = store.put({ key, value });
+    const store = tx(db, "readwrite");
+    const req = store.clear();
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
   });

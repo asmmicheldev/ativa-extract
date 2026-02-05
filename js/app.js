@@ -1,417 +1,244 @@
-import { dbGetAllItems, dbPutItem, dbDeleteItem, dbGetMeta } from "./db.js";
-import { exportBackup, importBackup } from "./backup.js";
-import { parseCardHeader } from "./parsers.js";
-import { parseCardChannels } from "./parsers.js";
-import {
-  uuid, nowISO, fmtDateTime, fmtDate, startOfDay, addDays, clampText
-} from "./utils.js";
+// js/app.js
+import { dbGetAllItems, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
+import { parseCardHeader, parseCardChannels } from "./parsers.js";
+import { uuid, nowISO, dayKeyLocal, fmtDateTime, clampText, startOfMonth, endOfMonth, addDays } from "./utils.js";
 
 let state = {
   items: [],
-  selectedId: null,
-  view: "incident",
+  monthCursor: startOfMonth(new Date()),
+  filterSpace: "journey",
+  filterChannel: "push",
   search: ""
 };
 
 const $ = (id) => document.getElementById(id);
 
-function badgeForArchived(archived) {
-  return archived ? { text:"Arquivado", cls:"" } : { text:"Ativo", cls:"blue" };
+// guarda contexto do modal (pra excluir o card)
+let modalCtx = { itemId: null, dayKey: null };
+
+function monthLabel(d) {
+  return d.toLocaleDateString("pt-BR", { month:"long", year:"numeric" });
 }
 
-function badgeForIncidentPaused(v) {
-  return v === "yes" ? { text:"Incidente", cls:"red" } : null;
-}
+function passesFilters(ev, itemName) {
+  // calendário = Journey/Push apenas
+  if (ev.space !== "journey") return false;
+  if (ev.channel !== "push") return false;
 
-function computeBufferEndISO(effectiveEndISO, bufferDays = 1) {
-  if (!effectiveEndISO) return null;
-  const d = new Date(effectiveEndISO);
-  if (isNaN(d.getTime())) return null;
-  const d2 = addDays(d, bufferDays);
-  return d2.toISOString();
-}
-
-function computeNextReviewISO(alwaysOn) {
-  if (alwaysOn !== "yes") return null;
-  const d = addDays(new Date(), 14);
-  return d.toISOString();
-}
-
-function nextEventDate(item) {
-  const now = new Date();
-  const future = (item.events || [])
-    .map(e => new Date(e.at))
-    .filter(d => !isNaN(d.getTime()))
-    .filter(d => d >= now)
-    .sort((x,y)=>x-y);
-  return future[0] || null;
-}
-
-function filterItems(items) {
   const q = state.search.trim().toLowerCase();
-
-  let out = items.filter(it => {
-    if (q) {
-      const hay = `${it.name} ${it.cardUrl || ""}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-
-  const now = new Date();
-  const day0 = startOfDay(now);
-  const day7 = addDays(day0, 7);
-
-  if (state.view === "archived") {
-    out = out.filter(it => !!it.archived);
-  } else {
-    out = out.filter(it => !it.archived);
+  if (q) {
+    const hay = `${itemName} ${ev.label || ""}`.toLowerCase();
+    if (!hay.includes(q)) return false;
   }
-
-  if (state.view === "alwaysOn") {
-    out = out.filter(it => it.alwaysOn === "yes");
-  } else if (state.view === "activeToday") {
-    out = out.filter(it => {
-      if (it.alwaysOn === "yes") return true;
-      const ws = it.windowStart ? new Date(it.windowStart) : null;
-      const we = it.windowEnd ? new Date(it.windowEnd) : null;
-      if (ws && we) return ws <= now && now <= we;
-      if (ws && !we) return ws <= now;
-      // se não tiver janela, considera se tem evento hoje
-      return (it.events || []).some(ev => {
-        const d = new Date(ev.at);
-        return d >= day0 && d < addDays(day0, 1);
-      });
-    });
-  } else if (state.view === "incident") {
-    out = out.filter(it => {
-      const hasUpcomingEvent = (it.events || []).some(ev => {
-        const d = new Date(ev.at);
-        return d >= day0 && d < day7;
-      });
-
-      if (hasUpcomingEvent) return true;
-
-      // banner ativo hoje
-      const ws = it.windowStart ? new Date(it.windowStart) : null;
-      const we = it.windowEnd ? new Date(it.windowEnd) : null;
-      if (ws && we && ws <= now && now <= we) return true;
-
-      if (it.alwaysOn === "yes") return true;
-
-      // buffer útil
-      if (it.bufferEnd) {
-        const b = new Date(it.bufferEnd);
-        if (b >= day0 && b < addDays(day0, 2)) return true;
-      }
-
-      return false;
-    });
-  }
-
-  out.sort((a,b) => {
-    const aNext = nextEventDate(a) || new Date(a.updatedAt || 0);
-    const bNext = nextEventDate(b) || new Date(b.updatedAt || 0);
-    return aNext - bNext;
-  });
-
-  return out;
+  return true;
 }
 
-function renderList() {
-  const host = $("itemsList");
-  host.innerHTML = "";
-
-  const items = filterItems(state.items);
-
-  if (!items.length) {
-    const div = document.createElement("div");
-    div.className = "hint";
-    div.textContent = "Nenhum item para este filtro.";
-    host.appendChild(div);
-    return;
-  }
-
-  for (const it of items) {
-    const div = document.createElement("div");
-    div.className = "list-item" + (it.id === state.selectedId ? " active" : "");
-    div.onclick = () => selectItem(it.id);
-
-    const top = document.createElement("div");
-    top.className = "li-top";
-
-    const title = document.createElement("div");
-    title.className = "li-title";
-    title.textContent = clampText(it.name, 70);
-
-    const badges = document.createElement("div");
-    badges.style.display = "flex";
-    badges.style.gap = "6px";
-    badges.style.alignItems = "center";
-
-    const aB = badgeForArchived(!!it.archived);
-    const b1 = document.createElement("span");
-    b1.className = `badge ${aB.cls}`;
-    b1.textContent = aB.text;
-    badges.appendChild(b1);
-
-    const inc = badgeForIncidentPaused(it.incidentPaused);
-    if (inc) {
-      const b2 = document.createElement("span");
-      b2.className = `badge ${inc.cls}`;
-      b2.textContent = inc.text;
-      badges.appendChild(b2);
-    }
-
-    if (it.alwaysOn === "yes") {
-      const b3 = document.createElement("span");
-      b3.className = "badge green";
-      b3.textContent = "Always On";
-      badges.appendChild(b3);
-    }
-
-    top.appendChild(title);
-    top.appendChild(badges);
-
-    const meta = document.createElement("div");
-    meta.className = "li-meta";
-
-    const next = nextEventDate(it);
-    const nextTxt = next ? `Próximo: ${fmtDateTime(next)}` : (it.alwaysOn === "yes" ? "Always On (sem eventos)" : "Sem eventos");
-    const endTxt = it.bufferEnd ? ` | Buffer: ${fmtDate(it.bufferEnd)}` : "";
-    meta.textContent = nextTxt + endTxt;
-
-    div.appendChild(top);
-    div.appendChild(meta);
-
-    host.appendChild(div);
-  }
-}
-
-function renderEventsTable(item) {
-  const evs = Array.isArray(item.events) ? item.events : [];
-  if (!evs.length) {
-    $("eventsTable").innerHTML = `<div class="hint">Sem eventos extraídos.</div>`;
-    return;
-  }
-
-  const rows = evs.map(e => `
-    <tr>
-      <td>${e.label || e.kind || "Evento"}</td>
-      <td>${e.channel || "—"}</td>
-      <td>${fmtDateTime(e.at)}</td>
-    </tr>
-  `).join("");
-
-  $("eventsTable").innerHTML = `
-    <table class="table">
-      <thead><tr><th>Evento</th><th>Canal</th><th>Data/Hora</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-}
-
-function renderPushTable(item) {
-  const push = item.channels?.push || [];
-  if (!push.length) {
-    $("pushTable").innerHTML = `<div class="hint">Sem push no card.</div>`;
-    return;
-  }
-
-  const rows = push.map(p => `
-    <tr>
-      <td>${p.posicaoJornada || "—"}</td>
-      <td><div class="small-mono">${(p.nome || "—")}</div></td>
-      <td>${p.titulo || "—"}</td>
-      <td>${fmtDateTime(p.dataInicio)}</td>
-      <td><div class="small-mono">${p.url || "—"}</div></td>
-    </tr>
-  `).join("");
-
-  $("pushTable").innerHTML = `
-    <table class="table">
-      <thead><tr><th>P</th><th>Nome</th><th>Título</th><th>Data</th><th>URL</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-}
-
-function renderBannerTable(item) {
-  const banners = item.channels?.banner || [];
-  if (!banners.length) {
-    $("bannerTable").innerHTML = `<div class="hint">Sem banner no card.</div>`;
-    return;
-  }
-
-  const rows = banners.map(b => `
-    <tr>
-      <td><div class="small-mono">${b.nomeExperiencia || "—"}</div></td>
-      <td>${b.tela || "—"}</td>
-      <td>${b.channel || "—"}</td>
-      <td>${fmtDateTime(b.dataInicio)}</td>
-      <td>${fmtDateTime(b.dataFim)}</td>
-      <td><div class="small-mono">${b.ctaUrl || "—"}</div></td>
-    </tr>
-  `).join("");
-
-  $("bannerTable").innerHTML = `
-    <table class="table">
-      <thead><tr><th>Experiência</th><th>Tela</th><th>Channel</th><th>Início</th><th>Fim</th><th>CTA URL</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-}
-
-function renderMktScreen(item) {
-  const ms = item.channels?.mktScreen || { url:"", blocks:[] };
-
-  $("mktInfo").innerHTML = ms.url
-    ? `<div class="meta"><span class="k">URL:</span> <span class="small-mono">${ms.url}</span></div>`
-    : `<div class="hint">Sem Marketing Screen no card.</div>`;
-
-  if (!ms.blocks?.length) {
-    $("mktBlocks").innerHTML = ms.url ? `<div class="hint">Sem blocos extraídos (ou card não tem POSIÇÃO/Template).</div>` : "";
-    return;
-  }
-
-  const rows = ms.blocks
-    .sort((a,b)=> (a.posicao||0) - (b.posicao||0))
-    .map(b => `
-      <tr>
-        <td>${b.posicao ?? "—"}</td>
-        <td>${b.template || "—"}</td>
-        <td>${b.titulo || "—"}</td>
-        <td><div class="small-mono">${b.ctaUrl || "—"}</div></td>
-      </tr>
-    `).join("");
-
-  $("mktBlocks").innerHTML = `
-    <table class="table">
-      <thead><tr><th>Pos</th><th>Template</th><th>Título</th><th>CTA</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-}
-
-function renderDetail() {
-  const item = state.items.find(x => x.id === state.selectedId);
-  if (!item) {
-    $("detail").classList.add("hidden");
-    $("emptyState").classList.remove("hidden");
-    return;
-  }
-
-  $("emptyState").classList.add("hidden");
-  $("detail").classList.remove("hidden");
-
-  $("detailTitle").textContent = item.name;
-
-  $("fieldName").value = item.name || "";
-  $("fieldCardUrl").value = item.cardUrl || "";
-  $("fieldAlwaysOn").value = item.alwaysOn || "no";
-  $("fieldIncidentPaused").value = item.incidentPaused || "no";
-  $("fieldNotes").value = item.notes || "";
-
-  const info = [];
-  info.push(`Criado: ${fmtDateTime(item.createdAt)}`);
-  info.push(`Atualizado: ${fmtDateTime(item.updatedAt)}`);
-  if (item.archived) info.push("Arquivado: sim");
-  $("eventsInfo").textContent = info.join(" | ");
-
-  $("effectiveStart").textContent = item.effectiveStart ? fmtDateTime(item.effectiveStart) : "—";
-  $("effectiveEnd").textContent = item.effectiveEnd ? fmtDateTime(item.effectiveEnd) : "—";
-  $("bufferEnd").textContent = item.bufferEnd ? fmtDateTime(item.bufferEnd) : "—";
-  $("nextReview").textContent = item.nextReviewAt ? fmtDateTime(item.nextReviewAt) : "—";
-
-  renderEventsTable(item);
-  renderPushTable(item);
-  renderBannerTable(item);
-  renderMktScreen(item);
-
-  renderTimeline();
-}
-
-function renderTimeline() {
-  const items = filterItems(state.items);
-
-  const now = new Date();
-  const start = startOfDay(now);
-  const days = state.view === "incident" ? 8 : 14;
+function collectEventsForMonth() {
+  const start = startOfMonth(state.monthCursor);
+  const end = endOfMonth(state.monthCursor);
 
   const map = new Map();
-  for (let i = 0; i < days; i++) {
-    const d = addDays(start, i);
-    const key = d.toISOString().slice(0,10);
-    map.set(key, []);
-  }
 
-  for (const it of items) {
+  for (const it of state.items) {
+    const itemName = it.name || "Item";
     for (const ev of (it.events || [])) {
+      if (!ev?.at) continue;
+      if (!passesFilters(ev, itemName)) continue;
+
       const dt = new Date(ev.at);
       if (isNaN(dt.getTime())) continue;
-      if (dt < start || dt >= addDays(start, days)) continue;
-      const key = dt.toISOString().slice(0,10);
-      if (!map.has(key)) continue;
+
+      if (dt < start || dt > addDays(end, 1)) continue;
+
+      const key = dayKeyLocal(dt);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+
       map.get(key).push({
-        id: it.id,
-        name: it.name,
-        label: ev.label || ev.kind,
-        channel: ev.channel || "—",
-        at: ev.at
+        itemId: it.id,
+        itemName,
+        ...ev
       });
     }
   }
 
   for (const [k, arr] of map.entries()) {
-    arr.sort((a,b)=> new Date(a.at) - new Date(b.at));
+    arr.sort((a,b) => new Date(a.at) - new Date(b.at));
+    map.set(k, arr);
   }
 
-  const host = $("timeline");
-  host.innerHTML = "";
+  return map;
+}
 
-  for (const [dayISO, entries] of map.entries()) {
-    const box = document.createElement("div");
-    box.className = "timeline-day";
+function buildMonthGridDates(monthCursor) {
+  const first = startOfMonth(monthCursor);
+  const firstDow = first.getDay();
+  const gridStart = addDays(first, -firstDow);
 
-    const title = document.createElement("h4");
-    const d = new Date(dayISO + "T00:00:00");
-    title.textContent = d.toLocaleDateString("pt-BR", { weekday:"short", year:"numeric", month:"2-digit", day:"2-digit" });
-    box.appendChild(title);
+  const last = endOfMonth(monthCursor);
+  const lastDow = last.getDay();
+  const gridEnd = addDays(last, 6 - lastDow);
 
-    if (!entries.length) {
-      const h = document.createElement("div");
-      h.className = "hint";
-      h.textContent = "Sem eventos.";
-      box.appendChild(h);
-    } else {
-      for (const e of entries) {
-        const li = document.createElement("div");
-        li.className = "timeline-item";
-        li.style.cursor = "pointer";
-        li.onclick = () => selectItem(e.id);
+  const dates = [];
+  let cur = new Date(gridStart);
+  while (cur <= gridEnd) {
+    dates.push(new Date(cur));
+    cur = addDays(cur, 1);
+  }
+  return dates;
+}
 
-        li.innerHTML = `
-          <div style="font-weight:700;font-size:12px">${fmtDateTime(e.at)} — ${e.label} (${e.channel})</div>
-          <div style="font-size:12px;color:#6b7280">${clampText(e.name, 90)}</div>
-        `;
-        box.appendChild(li);
-      }
+function pillClass() {
+  return "pill push";
+}
+
+function renderCalendar() {
+  $("monthLabel").textContent = monthLabel(state.monthCursor);
+
+  const grid = $("calendarGrid");
+  grid.innerHTML = "";
+
+  const eventsMap = collectEventsForMonth();
+  const dates = buildMonthGridDates(state.monthCursor);
+
+  const month = state.monthCursor.getMonth();
+  const todayKey = dayKeyLocal(new Date());
+
+  let totalVisible = 0;
+
+  for (const d of dates) {
+    const key = dayKeyLocal(d);
+    const isOutside = d.getMonth() !== month;
+    const isToday = key && key === todayKey;
+
+    const cell = document.createElement("div");
+    cell.className = "day" + (isOutside ? " outside" : "") + (isToday ? " today" : "");
+
+    const header = document.createElement("div");
+    header.className = "day-num";
+
+    const left = document.createElement("div");
+    left.textContent = String(d.getDate()).padStart(2, "0");
+
+    const right = document.createElement("div");
+    right.innerHTML = isToday ? `<span class="dot"></span>` : "";
+
+    header.appendChild(left);
+    header.appendChild(right);
+    cell.appendChild(header);
+
+    const pillsHost = document.createElement("div");
+    pillsHost.className = "pills";
+
+    const entries = (key && eventsMap.get(key)) ? eventsMap.get(key) : [];
+    if (entries.length) totalVisible += entries.length;
+
+    const showMax = 3;
+    const show = entries.slice(0, showMax);
+    const hidden = entries.length - show.length;
+
+    for (const ev of show) {
+      const pill = document.createElement("div");
+      pill.className = pillClass(ev);
+
+      const t1 = document.createElement("div");
+      t1.className = "t1";
+      t1.textContent = clampText(ev.label || "Push", 42);
+
+      const t2 = document.createElement("div");
+      t2.className = "t2";
+      t2.textContent = `${clampText(ev.itemName || "Card", 42)} • ${fmtDateTime(ev.at).slice(11,16)}`;
+
+      pill.appendChild(t1);
+      pill.appendChild(t2);
+
+      pill.onclick = () => openModal(ev);
+      pillsHost.appendChild(pill);
     }
 
-    host.appendChild(box);
+    if (hidden > 0) {
+      const more = document.createElement("div");
+      more.className = "more";
+      more.textContent = `+${hidden} itens`;
+      more.onclick = () => openDayModal(key, entries);
+      pillsHost.appendChild(more);
+    }
+
+    cell.onclick = (e) => {
+      if (e.target.closest(".pill") || e.target.closest(".more")) return;
+      if (entries.length) openDayModal(key, entries);
+    };
+
+    cell.appendChild(pillsHost);
+    grid.appendChild(cell);
   }
+
+  $("emptyHint").classList.toggle("hidden", totalVisible > 0);
+}
+
+function openModal(ev) {
+  modalCtx.itemId = ev.itemId || null;
+  modalCtx.dayKey = null;
+
+  $("modalTitle").textContent = `${ev.itemName || "Card"} — Journey/Push`;
+  $("modalBody").textContent =
+`Evento: ${ev.label || "—"}
+Quando: ${fmtDateTime(ev.at)}
+Tipo: ${ev.kind || "—"}`;
+
+  $("modal").classList.remove("hidden");
+  $("modal").setAttribute("aria-hidden", "false");
+}
+
+function openDayModal(dayKey, entries) {
+  modalCtx.itemId = null;
+  modalCtx.dayKey = dayKey;
+
+  const d = new Date(dayKey + "T00:00:00");
+  $("modalTitle").textContent = d.toLocaleDateString("pt-BR", { weekday:"long", year:"numeric", month:"long", day:"2-digit" });
+
+  const lines = entries.map(ev => {
+    const hhmm = fmtDateTime(ev.at).slice(11,16);
+    return `• ${hhmm}  ${ev.label}\n  ${ev.itemName}`;
+  }).join("\n\n");
+
+  $("modalBody").textContent = lines || "Sem eventos.";
+  $("modal").classList.remove("hidden");
+  $("modal").setAttribute("aria-hidden", "false");
+}
+
+function closeModal() {
+  modalCtx.itemId = null;
+  modalCtx.dayKey = null;
+  $("modal").classList.add("hidden");
+  $("modal").setAttribute("aria-hidden", "true");
 }
 
 async function refresh() {
   state.items = await dbGetAllItems();
-  renderList();
-  renderDetail();
+  renderCalendar();
 }
 
-function selectItem(id) {
-  state.selectedId = id;
-  renderList();
-  renderDetail();
+/**
+ * Identificador “simples” do card para evitar duplicação:
+ * - prioridade: cardUrl (se existir)
+ * - fallback: nome (displayName/headerLine)
+ */
+function findExistingItem({ cardUrl, name }) {
+  const url = (cardUrl || "").trim();
+  if (url) {
+    return state.items.find(it => (it.cardUrl || "").trim() === url) || null;
+  }
+  const nm = (name || "").trim().toLowerCase();
+  if (!nm) return null;
+  return state.items.find(it => (it.name || "").trim().toLowerCase() === nm) || null;
+}
+
+function eventsFingerprint(events) {
+  // fingerprint simples para detectar “mesmo conteúdo”
+  const arr = (events || []).map(e => `${e.space}|${e.channel}|${e.kind}|${e.at}|${e.label || ""}`);
+  arr.sort();
+  return arr.join("||");
 }
 
 async function createFromCard() {
@@ -421,176 +248,123 @@ async function createFromCard() {
     return;
   }
 
-  const alwaysOn = $("selectAlwaysOn").value;
-  const incidentPaused = $("selectIncidentPaused").value;
-
   const header = parseCardHeader(raw);
-  const parsed = parseCardChannels(raw);
+  const name = header.displayName || header.headerLine || "Item";
+  const parsed = parseCardChannels(raw, name);
 
+  // se não tiver nenhum push extraído, nem salva (evita “card vazio”)
+  const newEvents = parsed.events || [];
+  if (!newEvents.length) {
+    alert("Nenhum Push (Journey) foi encontrado nesse card. Nada foi adicionado.");
+    return;
+  }
+
+  const existing = findExistingItem({ cardUrl: header.cardUrl, name });
+
+  if (existing) {
+    // evita duplicar e permite “atualizar datas” do mesmo card
+    const oldFp = eventsFingerprint(existing.events || []);
+    const newFp = eventsFingerprint(newEvents);
+
+    if (oldFp === newFp) {
+      alert("Esse card já existe e não há mudanças de Push/datas. Não fiz nada.");
+      return;
+    }
+
+    const ok = confirm(
+      `Esse card já existe.\n\nQuer ATUALIZAR (substituir) os pushes salvos por estes novos?\n\n` +
+      `Isso resolve mudanças de data e evita duplicação.`
+    );
+    if (!ok) return;
+
+    existing.name = existing.name || name;
+    existing.cardUrl = existing.cardUrl || (header.cardUrl || "");
+    existing.channels = parsed.channels || existing.channels;
+    existing.events = newEvents;
+    existing.updatedAt = nowISO();
+
+    await dbPutItem(existing);
+    $("inputCard").value = "";
+    await refresh();
+    return;
+  }
+
+  // novo item
   const createdAt = nowISO();
-  const effectiveEnd = parsed.effectiveEnd;
-  const bufferEnd = (alwaysOn === "yes") ? null : computeBufferEndISO(effectiveEnd, 1);
-  const nextReviewAt = computeNextReviewISO(alwaysOn);
-
   const item = {
     id: uuid(),
-    name: header.displayName || header.headerLine || "Item",
-    alwaysOn,
-    incidentPaused,
-    archived: false,
+    name,
     cardUrl: header.cardUrl || "",
-    notes: "",
     createdAt,
     updatedAt: createdAt,
-
-    windowStart: parsed.windowStart || null,
-    windowEnd: parsed.windowEnd || null,
-    effectiveStart: parsed.effectiveStart || null,
-    effectiveEnd: effectiveEnd || null,
-    bufferEnd,
-    nextReviewAt,
-
-    events: parsed.events || [],
+    events: newEvents,
     channels: parsed.channels || { push:[], banner:[], mktScreen:{ url:"", blocks:[] } }
   };
 
   await dbPutItem(item);
-
   $("inputCard").value = "";
   await refresh();
-  selectItem(item.id);
 }
 
-async function saveDetail() {
-  const item = state.items.find(x => x.id === state.selectedId);
-  if (!item) return;
-
-  item.name = $("fieldName").value.trim() || "Item";
-  item.cardUrl = $("fieldCardUrl").value.trim();
-  item.alwaysOn = $("fieldAlwaysOn").value;
-  item.incidentPaused = $("fieldIncidentPaused").value;
-  item.notes = $("fieldNotes").value || "";
-  item.updatedAt = nowISO();
-
-  item.nextReviewAt = computeNextReviewISO(item.alwaysOn);
-  if (item.alwaysOn === "yes") item.bufferEnd = null;
-  else item.bufferEnd = item.bufferEnd || computeBufferEndISO(item.effectiveEnd, 1);
-
-  await dbPutItem(item);
-  await refresh();
-}
-
-async function reparseSelected() {
-  const item = state.items.find(x => x.id === state.selectedId);
-  if (!item) return;
-
-  const raw = prompt("Cole novamente o texto do card (isso atualiza canais/datas/eventos).");
-  if (!raw || !raw.trim()) return;
-
-  const header = parseCardHeader(raw);
-  const parsed = parseCardChannels(raw);
-
-  item.name = item.name || header.displayName || "Item";
-  item.cardUrl = item.cardUrl || header.cardUrl || "";
-
-  item.events = parsed.events || [];
-  item.channels = parsed.channels || item.channels;
-
-  item.windowStart = parsed.windowStart || null;
-  item.windowEnd = parsed.windowEnd || null;
-  item.effectiveStart = parsed.effectiveStart || null;
-  item.effectiveEnd = parsed.effectiveEnd || null;
-
-  if (item.alwaysOn !== "yes") item.bufferEnd = computeBufferEndISO(item.effectiveEnd, 1);
-  item.updatedAt = nowISO();
-
-  await dbPutItem(item);
-  await refresh();
-}
-
-async function archiveSelected() {
-  const item = state.items.find(x => x.id === state.selectedId);
-  if (!item) return;
-  const ok = confirm(`Arquivar "${item.name}"?`);
-  if (!ok) return;
-  item.archived = true;
-  item.updatedAt = nowISO();
-  await dbPutItem(item);
-  state.selectedId = null;
-  await refresh();
-}
-
-async function deleteSelected() {
-  const item = state.items.find(x => x.id === state.selectedId);
-  if (!item) return;
-  const ok = confirm(`Deletar "${item.name}"? Isso não tem como desfazer.`);
-  if (!ok) return;
-  await dbDeleteItem(item.id);
-  state.selectedId = null;
-  await refresh();
-}
-
-function setView(view) {
-  state.view = view;
-  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
-  document.querySelector(`.chip[data-view="${view}"]`)?.classList.add("active");
-  renderList();
-  renderDetail();
-}
-
-async function initBackupStamp() {
-  const last = await dbGetMeta("lastExportAt");
-  $("backupStamp").textContent = last ? `Último backup: ${fmtDateTime(last)}` : "Último backup: —";
-}
-
-async function runExport() {
-  try {
-    const when = await exportBackup();
-    await initBackupStamp();
-    alert(`Backup exportado. Data: ${fmtDateTime(when)}`);
-  } catch (e) {
-    alert("Falha ao exportar backup: " + (e?.message || e));
+async function deleteCardFromModal() {
+  const id = modalCtx.itemId;
+  if (!id) {
+    alert("Abra um evento (pill) para excluir o card inteiro.");
+    return;
   }
+  const it = state.items.find(x => x.id === id);
+  const ok = confirm(`Excluir o card inteiro?\n\n${it?.name || id}\n\nIsso remove todos os pushes desse card.`);
+  if (!ok) return;
+
+  await dbDeleteItem(id);
+  closeModal();
+  await refresh();
 }
 
-async function runImport(file) {
-  try {
-    const n = await importBackup(file);
-    await refresh();
-    await initBackupStamp();
-    alert(`Import concluído. Itens importados/mesclados: ${n}`);
-  } catch (e) {
-    alert("Falha ao importar backup: " + (e?.message || e));
-  }
+function shiftMonth(delta) {
+  const d = new Date(state.monthCursor);
+  d.setMonth(d.getMonth() + delta);
+  state.monthCursor = startOfMonth(d);
+  renderCalendar();
+}
+
+function gotoToday() {
+  state.monthCursor = startOfMonth(new Date());
+  renderCalendar();
 }
 
 // bindings
 $("btnParseCreate").onclick = createFromCard;
 $("btnClearInput").onclick = () => ($("inputCard").value = "");
-$("btnSave").onclick = saveDetail;
-$("btnReparse").onclick = reparseSelected;
-$("btnArchive").onclick = archiveSelected;
-$("btnDelete").onclick = deleteSelected;
 
-$("btnExport").onclick = runExport;
+$("btnPrev").onclick = () => shiftMonth(-1);
+$("btnNext").onclick = () => shiftMonth(1);
+$("btnToday").onclick = gotoToday;
 
-$("fileImport").addEventListener("change", async (e) => {
-  const f = e.target.files?.[0];
-  if (!f) return;
-  await runImport(f);
-  e.target.value = "";
-});
+// trava selects (UI)
+const spaceSel = $("filterSpace");
+const chanSel = $("filterChannel");
+if (spaceSel) { spaceSel.value = "journey"; spaceSel.disabled = true; }
+if (chanSel) { chanSel.value = "push"; chanSel.disabled = true; }
 
 $("searchBox").addEventListener("input", (e) => {
   state.search = e.target.value || "";
-  renderList();
+  renderCalendar();
 });
 
-document.querySelectorAll(".chip").forEach(btn => {
-  btn.addEventListener("click", () => setView(btn.dataset.view));
-});
+$("btnWipeAll").onclick = async () => {
+  const ok = confirm("Apagar tudo que está salvo localmente neste navegador?");
+  if (!ok) return;
+  await dbClearAll();
+  await refresh();
+};
+
+$("modalClose").onclick = closeModal;
+$("modalCloseBtn").onclick = closeModal;
+
+const delBtn = $("modalDeleteBtn");
+if (delBtn) delBtn.onclick = deleteCardFromModal;
 
 // init
 await refresh();
-await initBackupStamp();
-setView("incident");
+gotoToday();
