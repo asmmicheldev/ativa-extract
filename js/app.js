@@ -1,33 +1,134 @@
 // js/app.js
-import { dbGetAllItems, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
+import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
 import { parseCardHeader, parseCardChannels } from "./parsers.js";
 import { uuid, nowISO, dayKeyLocal, fmtDateTime, clampText, startOfMonth, endOfMonth, addDays } from "./utils.js";
 
 let state = {
   items: [],
   monthCursor: startOfMonth(new Date()),
-  filterSpace: "journey",
-  filterChannel: "push",
+  filterSpace: "all",
+  filterChannel: "all",
   search: ""
 };
 
 const $ = (id) => document.getElementById(id);
 
-// guarda contexto do modal (pra excluir o card)
-let modalCtx = { itemId: null, dayKey: null };
+// ---------- Modal binding ----------
+let modalBound = false;
+let currentModalEvent = null; // { itemId, id (eventId), label, alias, at, itemName, meta... }
 
+function bindModalOnce() {
+  if (modalBound) return;
+
+  const modal = $("modal");
+  const btnClose = $("modalCloseBtn");
+  const backdrop = $("modalClose");
+  const btnDelete = $("btnDeleteCard");
+  const btnSave = $("btnSaveAlias");
+  const aliasInput = $("aliasInput");
+
+  const missing = [];
+  if (!modal) missing.push("modal");
+  if (!btnClose) missing.push("modalCloseBtn");
+  if (!backdrop) missing.push("modalClose");
+  if (!btnDelete) missing.push("btnDeleteCard");
+  if (!btnSave) missing.push("btnSaveAlias");
+  if (!aliasInput) missing.push("aliasInput");
+
+  if (missing.length) {
+    console.error("IDs do modal não encontrados no HTML:", missing.join(", "));
+    return;
+  }
+
+  btnClose.addEventListener("click", closeModal);
+  backdrop.addEventListener("click", closeModal);
+
+  document.addEventListener("keydown", (e) => {
+    const modalEl = $("modal");
+    if (e.key === "Escape" && modalEl && !modalEl.classList.contains("hidden")) closeModal();
+  });
+
+  btnDelete.addEventListener("click", async () => {
+    if (!currentModalEvent?.itemId) return;
+    const ok = confirm("Excluir este card inteiro (todos os eventos dele)?");
+    if (!ok) return;
+
+    await dbDeleteItem(currentModalEvent.itemId);
+    closeModal();
+    await refresh();
+  });
+
+  btnSave.addEventListener("click", async () => {
+    if (!currentModalEvent?.itemId || !currentModalEvent?.id) return;
+
+    const alias = ($("aliasInput").value || "").trim();
+
+    const item = await dbGetItem(currentModalEvent.itemId);
+    if (!item) {
+      alert("Card não encontrado no banco local.");
+      return;
+    }
+
+    const evIndex = (item.events || []).findIndex(e => e && e.id === currentModalEvent.id);
+    if (evIndex === -1) {
+      alert("Evento não encontrado dentro do card.");
+      return;
+    }
+
+    item.events[evIndex].alias = alias;
+    item.updatedAt = nowISO();
+
+    await dbPutItem(item);
+
+    currentModalEvent.alias = alias;
+
+    await refresh();
+    closeModal();
+  });
+
+  modalBound = true;
+}
+
+function openModalBase(title, bodyText) {
+  bindModalOnce();
+
+  $("modalTitle").textContent = title || "—";
+  $("modalBody").textContent = bodyText || "";
+
+  const modal = $("modal");
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+
+  $("aliasInput").value = (currentModalEvent?.alias || "").trim();
+  $("aliasInput").focus();
+}
+
+function closeModal() {
+  const modal = $("modal");
+  if (!modal) return;
+
+  if (document.activeElement && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  currentModalEvent = null;
+  if ($("aliasInput")) $("aliasInput").value = "";
+}
+
+// ---------- Calendar logic ----------
 function monthLabel(d) {
-  return d.toLocaleDateString("pt-BR", { month:"long", year:"numeric" });
+  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
 
 function passesFilters(ev, itemName) {
-  // calendário = Journey/Push apenas
-  if (ev.space !== "journey") return false;
-  if (ev.channel !== "push") return false;
+  if (state.filterSpace !== "all" && ev.space !== state.filterSpace) return false;
+  if (state.filterChannel !== "all" && ev.channel !== state.filterChannel) return false;
 
   const q = state.search.trim().toLowerCase();
   if (q) {
-    const hay = `${itemName} ${ev.label || ""}`.toLowerCase();
+    const hay = `${itemName} ${ev.label || ""} ${ev.alias || ""}`.toLowerCase();
     if (!hay.includes(q)) return false;
   }
   return true;
@@ -41,8 +142,13 @@ function collectEventsForMonth() {
 
   for (const it of state.items) {
     const itemName = it.name || "Item";
+
     for (const ev of (it.events || [])) {
       if (!ev?.at) continue;
+
+      // Só Journey/Push no calendário
+      if (ev.space !== "journey" || ev.channel !== "push") continue;
+
       if (!passesFilters(ev, itemName)) continue;
 
       const dt = new Date(ev.at);
@@ -52,8 +158,8 @@ function collectEventsForMonth() {
 
       const key = dayKeyLocal(dt);
       if (!key) continue;
-      if (!map.has(key)) map.set(key, []);
 
+      if (!map.has(key)) map.set(key, []);
       map.get(key).push({
         itemId: it.id,
         itemName,
@@ -63,7 +169,7 @@ function collectEventsForMonth() {
   }
 
   for (const [k, arr] of map.entries()) {
-    arr.sort((a,b) => new Date(a.at) - new Date(b.at));
+    arr.sort((a, b) => new Date(a.at) - new Date(b.at));
     map.set(k, arr);
   }
 
@@ -90,6 +196,12 @@ function buildMonthGridDates(monthCursor) {
 
 function pillClass() {
   return "pill push";
+}
+
+function getDisplayName(ev) {
+  const a = (ev.alias || "").trim();
+  if (a) return a;
+  return (ev.label || "Push").trim();
 }
 
 function renderCalendar() {
@@ -141,18 +253,17 @@ function renderCalendar() {
       const pill = document.createElement("div");
       pill.className = pillClass(ev);
 
+      // ✅ Macro: só o nome (alias > label). Sem descrição/linha 2.
       const t1 = document.createElement("div");
       t1.className = "t1";
-      t1.textContent = clampText(ev.label || "Push", 42);
-
-      const t2 = document.createElement("div");
-      t2.className = "t2";
-      t2.textContent = `${clampText(ev.itemName || "Card", 42)} • ${fmtDateTime(ev.at).slice(11,16)}`;
-
+      t1.textContent = clampText(getDisplayName(ev), 60);
       pill.appendChild(t1);
-      pill.appendChild(t2);
 
-      pill.onclick = () => openModal(ev);
+      pill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openEventModal(ev);
+      });
+
       pillsHost.appendChild(pill);
     }
 
@@ -160,14 +271,16 @@ function renderCalendar() {
       const more = document.createElement("div");
       more.className = "more";
       more.textContent = `+${hidden} itens`;
-      more.onclick = () => openDayModal(key, entries);
+      more.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openDayModal(key, entries);
+      });
       pillsHost.appendChild(more);
     }
 
-    cell.onclick = (e) => {
-      if (e.target.closest(".pill") || e.target.closest(".more")) return;
+    cell.addEventListener("click", () => {
       if (entries.length) openDayModal(key, entries);
-    };
+    });
 
     cell.appendChild(pillsHost);
     grid.appendChild(cell);
@@ -176,69 +289,51 @@ function renderCalendar() {
   $("emptyHint").classList.toggle("hidden", totalVisible > 0);
 }
 
-function openModal(ev) {
-  modalCtx.itemId = ev.itemId || null;
-  modalCtx.dayKey = null;
+// ---------- Modal content ----------
+function openEventModal(ev) {
+  currentModalEvent = ev;
 
-  $("modalTitle").textContent = `${ev.itemName || "Card"} — Journey/Push`;
-  $("modalBody").textContent =
-`Evento: ${ev.label || "—"}
-Quando: ${fmtDateTime(ev.at)}
-Tipo: ${ev.kind || "—"}`;
+  // ✅ Título = alias (se existir) OU label (original). Sem "— journey/push".
+  const title = getDisplayName(ev);
 
-  $("modal").classList.remove("hidden");
-  $("modal").setAttribute("aria-hidden", "false");
+  // Conteúdo fixo (originais)
+  const body =
+`Card original:
+${ev.itemName || "—"}
+
+Evento original:
+${ev.label || "—"}
+
+Data original:
+${fmtDateTime(ev.at)}
+
+ID do evento:
+${ev.id || "—"}`;
+
+  openModalBase(title, body);
 }
 
 function openDayModal(dayKey, entries) {
-  modalCtx.itemId = null;
-  modalCtx.dayKey = dayKey;
-
   const d = new Date(dayKey + "T00:00:00");
-  $("modalTitle").textContent = d.toLocaleDateString("pt-BR", { weekday:"long", year:"numeric", month:"long", day:"2-digit" });
+  const title = d.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "2-digit" });
 
   const lines = entries.map(ev => {
-    const hhmm = fmtDateTime(ev.at).slice(11,16);
-    return `• ${hhmm}  ${ev.label}\n  ${ev.itemName}`;
+    const hhmm = fmtDateTime(ev.at).slice(11, 16);
+    const display = getDisplayName(ev);
+    return `• ${hhmm}  ${display}\n  ${ev.itemName}`;
   }).join("\n\n");
 
-  $("modalBody").textContent = lines || "Sem eventos.";
-  $("modal").classList.remove("hidden");
-  $("modal").setAttribute("aria-hidden", "false");
+  currentModalEvent = null;
+  openModalBase(title, lines || "Sem eventos.");
+
+  // day modal não edita alias
+  $("aliasInput").value = "";
 }
 
-function closeModal() {
-  modalCtx.itemId = null;
-  modalCtx.dayKey = null;
-  $("modal").classList.add("hidden");
-  $("modal").setAttribute("aria-hidden", "true");
-}
-
+// ---------- Data / actions ----------
 async function refresh() {
   state.items = await dbGetAllItems();
   renderCalendar();
-}
-
-/**
- * Identificador “simples” do card para evitar duplicação:
- * - prioridade: cardUrl (se existir)
- * - fallback: nome (displayName/headerLine)
- */
-function findExistingItem({ cardUrl, name }) {
-  const url = (cardUrl || "").trim();
-  if (url) {
-    return state.items.find(it => (it.cardUrl || "").trim() === url) || null;
-  }
-  const nm = (name || "").trim().toLowerCase();
-  if (!nm) return null;
-  return state.items.find(it => (it.name || "").trim().toLowerCase() === nm) || null;
-}
-
-function eventsFingerprint(events) {
-  // fingerprint simples para detectar “mesmo conteúdo”
-  const arr = (events || []).map(e => `${e.space}|${e.channel}|${e.kind}|${e.at}|${e.label || ""}`);
-  arr.sort();
-  return arr.join("||");
 }
 
 async function createFromCard() {
@@ -252,72 +347,19 @@ async function createFromCard() {
   const name = header.displayName || header.headerLine || "Item";
   const parsed = parseCardChannels(raw, name);
 
-  // se não tiver nenhum push extraído, nem salva (evita “card vazio”)
-  const newEvents = parsed.events || [];
-  if (!newEvents.length) {
-    alert("Nenhum Push (Journey) foi encontrado nesse card. Nada foi adicionado.");
-    return;
-  }
-
-  const existing = findExistingItem({ cardUrl: header.cardUrl, name });
-
-  if (existing) {
-    // evita duplicar e permite “atualizar datas” do mesmo card
-    const oldFp = eventsFingerprint(existing.events || []);
-    const newFp = eventsFingerprint(newEvents);
-
-    if (oldFp === newFp) {
-      alert("Esse card já existe e não há mudanças de Push/datas. Não fiz nada.");
-      return;
-    }
-
-    const ok = confirm(
-      `Esse card já existe.\n\nQuer ATUALIZAR (substituir) os pushes salvos por estes novos?\n\n` +
-      `Isso resolve mudanças de data e evita duplicação.`
-    );
-    if (!ok) return;
-
-    existing.name = existing.name || name;
-    existing.cardUrl = existing.cardUrl || (header.cardUrl || "");
-    existing.channels = parsed.channels || existing.channels;
-    existing.events = newEvents;
-    existing.updatedAt = nowISO();
-
-    await dbPutItem(existing);
-    $("inputCard").value = "";
-    await refresh();
-    return;
-  }
-
-  // novo item
   const createdAt = nowISO();
   const item = {
     id: uuid(),
     name,
     cardUrl: header.cardUrl || "",
+    notes: "",
     createdAt,
     updatedAt: createdAt,
-    events: newEvents,
-    channels: parsed.channels || { push:[], banner:[], mktScreen:{ url:"", blocks:[] } }
+    events: parsed.events || []
   };
 
   await dbPutItem(item);
   $("inputCard").value = "";
-  await refresh();
-}
-
-async function deleteCardFromModal() {
-  const id = modalCtx.itemId;
-  if (!id) {
-    alert("Abra um evento (pill) para excluir o card inteiro.");
-    return;
-  }
-  const it = state.items.find(x => x.id === id);
-  const ok = confirm(`Excluir o card inteiro?\n\n${it?.name || id}\n\nIsso remove todos os pushes desse card.`);
-  if (!ok) return;
-
-  await dbDeleteItem(id);
-  closeModal();
   await refresh();
 }
 
@@ -333,38 +375,37 @@ function gotoToday() {
   renderCalendar();
 }
 
-// bindings
-$("btnParseCreate").onclick = createFromCard;
-$("btnClearInput").onclick = () => ($("inputCard").value = "");
+// ---------- Bindings ----------
+$("btnParseCreate").addEventListener("click", createFromCard);
+$("btnClearInput").addEventListener("click", () => ($("inputCard").value = ""));
 
-$("btnPrev").onclick = () => shiftMonth(-1);
-$("btnNext").onclick = () => shiftMonth(1);
-$("btnToday").onclick = gotoToday;
+$("btnPrev").addEventListener("click", () => shiftMonth(-1));
+$("btnNext").addEventListener("click", () => shiftMonth(1));
+$("btnToday").addEventListener("click", gotoToday);
 
-// trava selects (UI)
-const spaceSel = $("filterSpace");
-const chanSel = $("filterChannel");
-if (spaceSel) { spaceSel.value = "journey"; spaceSel.disabled = true; }
-if (chanSel) { chanSel.value = "push"; chanSel.disabled = true; }
+$("filterSpace").addEventListener("change", (e) => {
+  state.filterSpace = e.target.value;
+  renderCalendar();
+});
+
+$("filterChannel").addEventListener("change", (e) => {
+  state.filterChannel = e.target.value;
+  renderCalendar();
+});
 
 $("searchBox").addEventListener("input", (e) => {
   state.search = e.target.value || "";
   renderCalendar();
 });
 
-$("btnWipeAll").onclick = async () => {
+$("btnWipeAll").addEventListener("click", async () => {
   const ok = confirm("Apagar tudo que está salvo localmente neste navegador?");
   if (!ok) return;
   await dbClearAll();
   await refresh();
-};
-
-$("modalClose").onclick = closeModal;
-$("modalCloseBtn").onclick = closeModal;
-
-const delBtn = $("modalDeleteBtn");
-if (delBtn) delBtn.onclick = deleteCardFromModal;
+});
 
 // init
+bindModalOnce();
 await refresh();
 gotoToday();

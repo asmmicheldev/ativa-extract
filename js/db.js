@@ -1,6 +1,6 @@
 // js/db.js
-const DB_NAME = "ativas_extract_db";
-const DB_VERSION = 5; // IMPORTANTE: precisa ser >= versão já existente no navegador
+const DB_NAME = "ativas_extract_db_v1";
+const DB_VERSION = 1;
 const STORE = "items";
 
 function openDB() {
@@ -9,14 +9,9 @@ function openDB() {
 
     req.onupgradeneeded = () => {
       const db = req.result;
-
-      // garante store
-      if (db.objectStoreNames.contains(STORE)) {
-        // se você quer manter simples e evitar migração agora:
-        // recria do zero quando muda schema
-        db.deleteObjectStore(STORE);
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: "id" });
       }
-      db.createObjectStore(STORE, { keyPath: "id" });
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -34,6 +29,16 @@ export async function dbGetAllItems() {
     const store = tx(db);
     const req = store.getAll();
     req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function dbGetItem(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const store = tx(db);
+    const req = store.get(id);
+    req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
 }

@@ -16,9 +16,9 @@
 
     <div class="topbar-actions">
       <div class="month-nav">
-        <button id="btnPrev" class="btn btn-secondary">←</button>
-        <button id="btnToday" class="btn">Hoje</button>
-        <button id="btnNext" class="btn btn-secondary">→</button>
+        <button id="btnPrev" class="btn btn-secondary" type="button">←</button>
+        <button id="btnToday" class="btn" type="button">Hoje</button>
+        <button id="btnNext" class="btn btn-secondary" type="button">→</button>
       </div>
 
       <div id="monthLabel" class="month-label"></div>
@@ -34,13 +34,12 @@
         <textarea id="inputCard" class="textarea" placeholder="Cole aqui o texto do card da XP..."></textarea>
 
         <div class="row">
-          <button id="btnParseCreate" class="btn btn-primary">Adicionar no calendário</button>
-          <button id="btnClearInput" class="btn btn-secondary">Limpar</button>
+          <button id="btnParseCreate" class="btn btn-primary" type="button">Adicionar no calendário</button>
+          <button id="btnClearInput" class="btn btn-secondary" type="button">Limpar</button>
         </div>
 
         <div class="hint">
-          Regra: o card pode ter vários canais. Nesta fase, só viram “bloquinhos” no calendário:
-          Push (dataInicio). Banner e MktScreen ficam fora do calendário por enquanto.
+          Regra: nesta fase, só viram “bloquinhos” no calendário os eventos de Journey/Push.
         </div>
       </div>
 
@@ -50,15 +49,17 @@
         <div class="row">
           <div class="col">
             <label class="label">Espaço</label>
-            <select id="filterSpace" class="select" disabled>
-              <option value="journey" selected>Journey (Push)</option>
+            <select id="filterSpace" class="select">
+              <option value="all">Todos</option>
+              <option value="journey">Journey (Push)</option>
             </select>
           </div>
 
           <div class="col">
             <label class="label">Canal</label>
-            <select id="filterChannel" class="select" disabled>
-              <option value="push" selected>Push</option>
+            <select id="filterChannel" class="select">
+              <option value="all">Todos</option>
+              <option value="push">Push</option>
             </select>
           </div>
         </div>
@@ -67,7 +68,7 @@
         <input id="searchBox" class="input" placeholder="Nome do card/código..." />
 
         <div class="row">
-          <button id="btnWipeAll" class="btn btn-danger">Apagar tudo (local)</button>
+          <button id="btnWipeAll" class="btn btn-danger" type="button">Apagar tudo (local)</button>
         </div>
       </div>
     </aside>
@@ -88,12 +89,12 @@
       </div>
 
       <div id="emptyHint" class="empty-hint hidden">
-        Nenhum evento para este mês.
+        Nenhum evento para este mês com os filtros atuais.
       </div>
     </section>
   </main>
 
-  <!-- Modal (detalhe rápido + excluir card inteiro) -->
+  <!-- MODAL -->
   <div id="modal" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop" id="modalClose"></div>
 
@@ -102,9 +103,19 @@
 
       <div id="modalBody" class="modal-body"></div>
 
+      <!-- input do alias por EVENTO -->
+      <div class="form-block">
+        <label class="label">Nome do bloco (manual)</label>
+        <input id="aliasInput" class="input" placeholder="Ex: XP Push 1 [Campanha PGBL sem Recorrência]" />
+        <div class="hint" style="margin-top:8px;">
+          Esse nome substitui só este bloquinho (este evento/push). Não altera outros pushes do mesmo card.
+        </div>
+      </div>
+
       <div class="modal-actions">
-        <button id="modalDeleteBtn" class="btn btn-danger">Excluir card</button>
-        <button id="modalCloseBtn" class="btn btn-secondary">Fechar</button>
+        <button id="btnDeleteCard" class="btn btn-danger" type="button">Excluir card</button>
+        <button id="btnSaveAlias" class="btn btn-primary" type="button">Salvar nome</button>
+        <button id="modalCloseBtn" class="btn btn-secondary" type="button">Fechar</button>
       </div>
     </div>
   </div>

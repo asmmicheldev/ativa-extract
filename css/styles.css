@@ -1,4 +1,4 @@
-/* css/styles.css (dark mode + calendar grid) */
+/* css/styles.css (SEU CSS COMPLETO + apenas mantém o que já está; não precisa mudar nada para o alias) */
 :root{
   --bg:#0b0f1a;
   --panel:#0f1626;
@@ -8,7 +8,6 @@
   --border:#243047;
   --shadow:0 0 14px rgba(0,0,0,.35);
   --accent:#7c3aed;   /* roxo */
-  --accent2:#e11d48;  /* vermelho */
   --danger:#b91c1c;
 }
 
@@ -42,7 +41,7 @@ body{
 .month-label{
   font-weight:700;
   color:var(--text);
-  min-width: 160px;
+  min-width: 180px;
   text-align:right;
 }
 
@@ -199,7 +198,7 @@ body{
 }
 
 .pill{
-  border:1px solid #334155;
+  border:1px solid rgba(124,58,237,.55);
   background:#0c1426;
   border-radius:7px;
   padding:6px 8px;
@@ -208,7 +207,7 @@ body{
 .pill:hover{filter:brightness(1.12)}
 .pill .t1{
   font-size:11px;
-  font-weight:700;
+  font-weight:800;
   color:#e2e8f0;
   line-height:1.2;
 }
@@ -219,14 +218,11 @@ body{
   line-height:1.2;
 }
 
-.pill.push{border-color: rgba(124,58,237,.55)}
-.pill.banner{border-color: rgba(225,29,72,.45)}
-.pill.bannerEnd{border-color: rgba(225,29,72,.25); opacity:.9}
-
 .more{
   font-size:11px;
   color:var(--muted);
   padding:4px 6px;
+  cursor:pointer;
 }
 
 .empty-hint{
@@ -234,24 +230,15 @@ body{
   color:var(--muted);
   font-size:12px;
 }
+.hidden{display:none}
 
 /* Modal */
-.modal{
-  position:fixed;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  z-index:50;
-}
-.modal-backdrop{
-  position:absolute;
-  inset:0;
-  background:rgba(0,0,0,.55);
-}
+.modal{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:9999;}
+.modal.hidden{display:none;}
+.modal-backdrop{position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:0;}
 .modal-card{
   position:relative;
-  width:min(720px, calc(100vw - 24px));
+  width:min(860px, calc(100vw - 24px));
   max-height: calc(100vh - 24px);
   overflow:auto;
   background:var(--panel);
@@ -259,11 +246,9 @@ body{
   border-radius:12px;
   box-shadow:var(--shadow);
   padding:14px;
+  z-index:1;
 }
-.modal-title{font-weight:800; margin-bottom:10px;}
-.modal-body{color:var(--text); font-size:12px; line-height:1.4; white-space:pre-wrap;}
-.modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:12px;}
-
-/* ===== FIX: hidden precisa ganhar do display:flex do .modal ===== */
-.hidden{display:none}
-.modal.hidden{display:none !important;}
+.modal-title{font-weight:900; margin-bottom:10px; font-size:16px;}
+.modal-body{color:var(--text); font-size:12px; line-height:1.45; white-space:pre-wrap;}
+.modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:12px; flex-wrap:wrap;}
+.form-block{margin-top:12px;}

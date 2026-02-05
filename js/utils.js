@@ -43,6 +43,15 @@ export function fmtDateTime(d) {
   });
 }
 
+export function fmtTimeHHMM(d) {
+  if (!d) return "—";
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return "—";
+  const hh = String(dt.getHours()).padStart(2, "0");
+  const mm = String(dt.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 // chave local yyyy-mm-dd (sem UTC shift)
 export function dayKeyLocal(dateOrISO) {
   const dt = (dateOrISO instanceof Date) ? dateOrISO : new Date(dateOrISO);
@@ -75,4 +84,15 @@ export function addDays(d, n) {
   const dt = new Date(d);
   dt.setDate(dt.getDate() + n);
   return dt;
+}
+
+// hash simples e estável (FNV-1a 32-bit) para id de evento
+export function stableHash(str) {
+  let h = 0x811c9dc5;
+  const s = String(str ?? "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return ("00000000" + h.toString(16)).slice(-8);
 }
