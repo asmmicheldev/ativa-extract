@@ -19,6 +19,12 @@ let currentModalEvent = null;
 let aliasDirty = false;
 let saveTimer = null;
 
+function todayStartLocal() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 function fmtDateOnly(d) {
   const dt = (d instanceof Date) ? d : new Date(d);
   if (isNaN(dt.getTime())) return "—";
@@ -60,6 +66,36 @@ function escapeHTML(s) {
     .replaceAll("'", "&#039;");
 }
 
+// ---------- Status por card ----------
+function computeCardLastAt(item) {
+  let max = null;
+  for (const ev of (item.events || [])) {
+    if (!ev?.at) continue;
+    if (ev.space !== "journey" || ev.channel !== "push") continue;
+    const dt = new Date(ev.at);
+    if (isNaN(dt.getTime())) continue;
+    if (!max || dt > max) max = dt;
+  }
+  return max; // Date|null
+}
+
+function computeCardStatus(item) {
+  // override manual
+  if (item?.journeyDisabled === true) return "disabled";
+
+  const lastAt = computeCardLastAt(item);
+  if (!lastAt) return "active"; // sem data (ou sem push), por enquanto considera verde
+
+  const today0 = todayStartLocal();
+  return (lastAt < today0) ? "expired" : "active";
+}
+
+function statusClass(status) {
+  if (status === "disabled") return "status-disabled";
+  if (status === "expired") return "status-expired";
+  return "status-active";
+}
+
 // ---------- Modal binding ----------
 function bindModalOnce() {
   if (modalBound) return;
@@ -67,12 +103,14 @@ function bindModalOnce() {
   const modal = $("modal");
   const backdrop = $("modalClose");
   const btnDelete = $("btnDeleteCard");
+  const btnDisable = $("btnDisableJourney");
   const titleEl = $("modalTitle");
 
   const missing = [];
   if (!modal) missing.push("modal");
   if (!backdrop) missing.push("modalClose");
   if (!btnDelete) missing.push("btnDeleteCard");
+  if (!btnDisable) missing.push("btnDisableJourney");
   if (!titleEl) missing.push("modalTitle");
 
   if (missing.length) {
@@ -106,13 +144,31 @@ function bindModalOnce() {
     await refresh();
   });
 
+  // Jornada desativada (cinza)
+  btnDisable.addEventListener("click", async () => {
+    if (!currentModalEvent?.itemId) return;
+
+    const ok = confirm("Confirmar: você já desativou a jornada na Adobe e quer marcar este card como 'Jornada desativada' aqui?");
+    if (!ok) return;
+
+    const item = await dbGetItem(currentModalEvent.itemId);
+    if (!item) return;
+
+    item.journeyDisabled = true;
+    item.journeyDisabledAt = nowISO();
+    item.updatedAt = nowISO();
+
+    await dbPutItem(item);
+    await refresh();
+    closeModal();
+  });
+
   // Auto-save: edição no título
   titleEl.addEventListener("input", () => {
     aliasDirty = true;
     scheduleSave();
   });
 
-  // Ao sair do título: salva
   titleEl.addEventListener("blur", async () => {
     await saveAliasIfDirty();
   });
@@ -169,7 +225,7 @@ async function saveAliasIfDirty() {
     showSaving(false);
     showSavedOk();
 
-    await refresh(); // atualiza o pill
+    await refresh();
   } catch (err) {
     console.error(err);
     showSaving(false);
@@ -192,7 +248,6 @@ function openModalBase(titleText, bodyHTML) {
   showSaving(false);
   $("saveOk").classList.add("hidden");
 
-  // foca no título (edição direta)
   $("modalTitle").focus();
 }
 
@@ -240,6 +295,7 @@ function collectEventsForMonth() {
 
   for (const it of state.items) {
     const itemName = it.name || "Item";
+    const cardStatus = computeCardStatus(it);
 
     for (const ev of (it.events || [])) {
       if (!ev?.at) continue;
@@ -259,6 +315,7 @@ function collectEventsForMonth() {
       map.get(key).push({
         itemId: it.id,
         itemName,
+        cardStatus,
         ...ev
       });
     }
@@ -337,7 +394,7 @@ function renderCalendar() {
 
     for (const ev of show) {
       const pill = document.createElement("div");
-      pill.className = "pill push";
+      pill.className = `pill push ${statusClass(ev.cardStatus)}`;
 
       const t1 = document.createElement("div");
       t1.className = "t1";
@@ -378,7 +435,7 @@ function renderCalendar() {
 function openEventModal(ev) {
   currentModalEvent = ev;
 
-  // ✅ título do modal = alias (ou label se ainda não tiver)
+  // título do modal = alias (ou label)
   const title = getDisplayName(ev);
 
   const pos = getPosFromEvent(ev);
@@ -408,7 +465,7 @@ async function refresh() {
   renderCalendar();
 }
 
-// ✅ AGORA: alias default = só o nome completo do card
+// alias default = nome completo (linha 1 do card)
 function makeDefaultAlias(cardFullTitle) {
   return String(cardFullTitle || "").trim() || "Card";
 }
@@ -421,16 +478,10 @@ async function createFromCard() {
   }
 
   const header = parseCardHeader(raw);
-
-  // nome completo da task (primeira linha inteira)
   const fullTitle = (header.headerLine || "").trim() || "Card";
-
-  // nome “curto” pro item (continua igual)
   const name = header.displayName || header.headerLine || "Item";
-
   const parsed = parseCardChannels(raw, name);
 
-  // ✅ preenche alias default em cada evento (se vier vazio)
   for (const ev of (parsed.events || [])) {
     if (!ev.alias || !String(ev.alias).trim()) {
       ev.alias = makeDefaultAlias(fullTitle);
@@ -445,6 +496,8 @@ async function createFromCard() {
     notes: "",
     createdAt,
     updatedAt: createdAt,
+    journeyDisabled: false,
+    journeyDisabledAt: "",
     events: parsed.events || []
   };
 
