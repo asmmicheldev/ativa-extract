@@ -51,19 +51,26 @@ function getComunicacaoName(ev) {
   return label.trim() || "—";
 }
 
+function escapeHTML(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 // ---------- Modal binding ----------
 function bindModalOnce() {
   if (modalBound) return;
 
   const modal = $("modal");
-  const btnClose = $("modalCloseBtn");
   const backdrop = $("modalClose");
   const btnDelete = $("btnDeleteCard");
   const titleEl = $("modalTitle");
 
   const missing = [];
   if (!modal) missing.push("modal");
-  if (!btnClose) missing.push("modalCloseBtn");
   if (!backdrop) missing.push("modalClose");
   if (!btnDelete) missing.push("btnDeleteCard");
   if (!titleEl) missing.push("modalTitle");
@@ -74,11 +81,6 @@ function bindModalOnce() {
   }
 
   // fechar (salva antes)
-  btnClose.addEventListener("click", async () => {
-    await saveAliasIfDirty();
-    closeModal();
-  });
-
   backdrop.addEventListener("click", async () => {
     await saveAliasIfDirty();
     closeModal();
@@ -190,7 +192,7 @@ function openModalBase(titleText, bodyHTML) {
   showSaving(false);
   $("saveOk").classList.add("hidden");
 
-  // foca no título (já que editar é direto)
+  // foca no título (edição direta)
   $("modalTitle").focus();
 }
 
@@ -339,7 +341,7 @@ function renderCalendar() {
 
       const t1 = document.createElement("div");
       t1.className = "t1";
-      t1.textContent = clampText(getDisplayName(ev), 60);
+      t1.textContent = clampText(getDisplayName(ev), 70);
       pill.appendChild(t1);
 
       pill.addEventListener("click", (e) => {
@@ -376,13 +378,13 @@ function renderCalendar() {
 function openEventModal(ev) {
   currentModalEvent = ev;
 
+  // ✅ título do modal = alias (ou label se ainda não tiver)
   const title = getDisplayName(ev);
 
   const pos = getPosFromEvent(ev);
   const when = fmtDateOnly(ev.at);
   const commName = getComunicacaoName(ev);
 
-  // ✅ hierarquia: card maior/negrito, data muted, push normal
   const bodyHTML =
     `<div class="mb-journey">${escapeHTML(ev.itemName || "—")}</div>
      <div class="mb-date">${escapeHTML(`${pos} (PUSH) - ${when}`)}</div>
@@ -395,24 +397,20 @@ function openDayModal(dayKey, entries) {
   const d = new Date(dayKey + "T00:00:00");
   const title = d.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "2-digit" });
 
-  const lines = entries.map(ev => `• ${getDisplayName(ev)}`).join("<br/>");
+  const lines = entries.map(ev => `• ${escapeHTML(getDisplayName(ev))}`).join("<br/>");
   currentModalEvent = null;
   openModalBase(title, lines || "Sem eventos.");
-}
-
-function escapeHTML(s) {
-  return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 // ---------- Data / actions ----------
 async function refresh() {
   state.items = await dbGetAllItems();
   renderCalendar();
+}
+
+// ✅ AGORA: alias default = só o nome completo do card
+function makeDefaultAlias(cardFullTitle) {
+  return String(cardFullTitle || "").trim() || "Card";
 }
 
 async function createFromCard() {
@@ -423,8 +421,21 @@ async function createFromCard() {
   }
 
   const header = parseCardHeader(raw);
+
+  // nome completo da task (primeira linha inteira)
+  const fullTitle = (header.headerLine || "").trim() || "Card";
+
+  // nome “curto” pro item (continua igual)
   const name = header.displayName || header.headerLine || "Item";
+
   const parsed = parseCardChannels(raw, name);
+
+  // ✅ preenche alias default em cada evento (se vier vazio)
+  for (const ev of (parsed.events || [])) {
+    if (!ev.alias || !String(ev.alias).trim()) {
+      ev.alias = makeDefaultAlias(fullTitle);
+    }
+  }
 
   const createdAt = nowISO();
   const item = {
