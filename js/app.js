@@ -13,16 +13,24 @@ let state = {
 
 const $ = (id) => document.getElementById(id);
 
-// ---------- Modal state ----------
-let modalBound = false;
-let currentModalEvent = null;
-let aliasDirty = false;
-let saveTimer = null;
-
+// ---------- Helpers ----------
 function todayStartLocal() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+function fmtDateTime(d) {
+  if (!d) return "—";
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return "—";
+  return dt.toLocaleString("pt-BR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function fmtDateOnly(d) {
@@ -34,9 +42,15 @@ function fmtDateOnly(d) {
   return `${dd}/${mm}/${yy}`;
 }
 
+function getItemById(id) {
+  return state.items.find(x => x && x.id === id) || null;
+}
+
 function getDisplayName(ev) {
   const a = (ev?.alias || "").trim();
   if (a) return a;
+  const card = (ev?.itemName || "").trim();
+  if (card) return card;
   return (ev?.label || "Push").trim();
 }
 
@@ -51,10 +65,9 @@ function getComunicacaoName(ev) {
   const n = (ev?.meta?.nomeComunicacao || "").trim();
   if (n) return n;
 
-  const label = String(ev?.label || "");
-  const parts = label.split("—");
-  if (parts.length >= 2) return parts.slice(1).join("—").trim();
-  return label.trim() || "—";
+  const label = String(ev?.label || "").trim();
+  const cleaned = label.replace(/^Push\s+\w+\s+—\s+/i, "").trim();
+  return cleaned || label || "—";
 }
 
 function escapeHTML(s) {
@@ -76,15 +89,14 @@ function computeCardLastAt(item) {
     if (isNaN(dt.getTime())) continue;
     if (!max || dt > max) max = dt;
   }
-  return max; // Date|null
+  return max;
 }
 
 function computeCardStatus(item) {
-  // override manual
   if (item?.journeyDisabled === true) return "disabled";
 
   const lastAt = computeCardLastAt(item);
-  if (!lastAt) return "active"; // sem data (ou sem push), por enquanto considera verde
+  if (!lastAt) return "active";
 
   const today0 = todayStartLocal();
   return (lastAt < today0) ? "expired" : "active";
@@ -94,6 +106,77 @@ function statusClass(status) {
   if (status === "disabled") return "status-disabled";
   if (status === "expired") return "status-expired";
   return "status-active";
+}
+
+// ---------- Modal state ----------
+let modalBound = false;
+let currentModalEvent = null;
+let aliasDirty = false;
+let saveTimer = null;
+
+function safeClassToggle(id, className, on) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.toggle(className, on);
+}
+
+function showSaving(on) {
+  safeClassToggle("saveState", "hidden", !on);
+  if (on) safeClassToggle("saveOk", "hidden", true);
+}
+
+function showSavedOk() {
+  const el = $("saveOk");
+  if (!el) return;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 900);
+}
+
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  showSaving(true);
+  saveTimer = setTimeout(async () => {
+    await saveAliasIfDirty();
+  }, 450);
+}
+
+async function saveAliasIfDirty() {
+  if (!aliasDirty) {
+    showSaving(false);
+    return;
+  }
+  if (!currentModalEvent?.itemId || !currentModalEvent?.id) {
+    aliasDirty = false;
+    showSaving(false);
+    return;
+  }
+
+  const titleEl = $("modalTitle");
+  const newAlias = (titleEl?.textContent || "").trim();
+
+  try {
+    const item = await dbGetItem(currentModalEvent.itemId);
+    if (!item) throw new Error("Card não encontrado.");
+
+    const idx = (item.events || []).findIndex(e => e && e.id === currentModalEvent.id);
+    if (idx === -1) throw new Error("Evento não encontrado no card.");
+
+    item.events[idx].alias = newAlias;
+    item.updatedAt = nowISO();
+
+    await dbPutItem(item);
+
+    currentModalEvent.alias = newAlias;
+    aliasDirty = false;
+
+    showSaving(false);
+    showSavedOk();
+
+    await refresh();
+  } catch (err) {
+    console.error(err);
+    showSaving(false);
+  }
 }
 
 // ---------- Modal binding ----------
@@ -118,7 +201,6 @@ function bindModalOnce() {
     return;
   }
 
-  // fechar (salva antes)
   backdrop.addEventListener("click", async () => {
     await saveAliasIfDirty();
     closeModal();
@@ -133,7 +215,6 @@ function bindModalOnce() {
     }
   });
 
-  // Excluir card
   btnDelete.addEventListener("click", async () => {
     if (!currentModalEvent?.itemId) return;
     const ok = confirm("Excluir este card inteiro (todos os eventos dele)?");
@@ -144,7 +225,6 @@ function bindModalOnce() {
     await refresh();
   });
 
-  // Jornada desativada (cinza)
   btnDisable.addEventListener("click", async () => {
     if (!currentModalEvent?.itemId) return;
 
@@ -163,7 +243,6 @@ function bindModalOnce() {
     closeModal();
   });
 
-  // Auto-save: edição no título
   titleEl.addEventListener("input", () => {
     aliasDirty = true;
     scheduleSave();
@@ -176,79 +255,26 @@ function bindModalOnce() {
   modalBound = true;
 }
 
-function showSaving(on) {
-  $("saveState").classList.toggle("hidden", !on);
-  if (on) $("saveOk").classList.add("hidden");
-}
-
-function showSavedOk() {
-  $("saveOk").classList.remove("hidden");
-  setTimeout(() => $("saveOk").classList.add("hidden"), 900);
-}
-
-function scheduleSave() {
-  if (saveTimer) clearTimeout(saveTimer);
-  showSaving(true);
-  saveTimer = setTimeout(async () => {
-    await saveAliasIfDirty();
-  }, 450);
-}
-
-async function saveAliasIfDirty() {
-  if (!aliasDirty) {
-    showSaving(false);
-    return;
-  }
-  if (!currentModalEvent?.itemId || !currentModalEvent?.id) {
-    aliasDirty = false;
-    showSaving(false);
-    return;
-  }
-
-  const titleEl = $("modalTitle");
-  const newAlias = (titleEl.textContent || "").trim();
-
-  try {
-    const item = await dbGetItem(currentModalEvent.itemId);
-    if (!item) throw new Error("Card não encontrado.");
-
-    const idx = (item.events || []).findIndex(e => e && e.id === currentModalEvent.id);
-    if (idx === -1) throw new Error("Evento não encontrado no card.");
-
-    item.events[idx].alias = newAlias;
-    item.updatedAt = nowISO();
-
-    await dbPutItem(item);
-
-    currentModalEvent.alias = newAlias;
-    aliasDirty = false;
-    showSaving(false);
-    showSavedOk();
-
-    await refresh();
-  } catch (err) {
-    console.error(err);
-    showSaving(false);
-  }
-}
-
 function openModalBase(titleText, bodyHTML) {
   bindModalOnce();
 
-  $("modalTitle").textContent = titleText || "—";
-
-  const body = $("modalBody");
-  body.innerHTML = bodyHTML || "";
-
+  const titleEl = $("modalTitle");
+  const bodyEl = $("modalBody");
   const modal = $("modal");
+
+  if (!titleEl || !bodyEl || !modal) return;
+
+  titleEl.textContent = titleText || "—";
+  bodyEl.innerHTML = bodyHTML || "";
+
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
 
   aliasDirty = false;
   showSaving(false);
-  $("saveOk").classList.add("hidden");
+  safeClassToggle("saveOk", "hidden", true);
 
-  $("modalTitle").focus();
+  titleEl.focus();
 }
 
 function closeModal() {
@@ -261,6 +287,7 @@ function closeModal() {
 
   modal.classList.add("hidden");
   modal.setAttribute("aria-hidden", "true");
+
   currentModalEvent = null;
   aliasDirty = false;
 
@@ -299,7 +326,6 @@ function collectEventsForMonth() {
 
     for (const ev of (it.events || [])) {
       if (!ev?.at) continue;
-
       if (ev.space !== "journey" || ev.channel !== "push") continue;
       if (!passesFilters(ev, itemName)) continue;
 
@@ -399,6 +425,7 @@ function renderCalendar() {
       const t1 = document.createElement("div");
       t1.className = "t1";
       t1.textContent = clampText(getDisplayName(ev), 70);
+
       pill.appendChild(t1);
 
       pill.addEventListener("click", (e) => {
@@ -432,20 +459,40 @@ function renderCalendar() {
 }
 
 // ---------- Modal content ----------
+function getChannelCountsForItem(item) {
+  const cc = item?.channelCounts || null;
+  const pushN = (cc && Number.isFinite(cc.push)) ? cc.push : (item?.events || []).filter(e => e?.space === "journey" && e?.channel === "push").length;
+  const bannerN = (cc && Number.isFinite(cc.banner)) ? cc.banner : 0;
+  const mktN = (cc && Number.isFinite(cc.mktScreen)) ? cc.mktScreen : 0;
+
+  const parts = [];
+  if (pushN > 0) parts.push(`Push (${pushN})`);
+  if (bannerN > 0) parts.push(`Banner (${bannerN})`);
+  if (mktN > 0) parts.push(`MktScreen (${mktN})`);
+
+  return parts.join(" ");
+}
+
 function openEventModal(ev) {
   currentModalEvent = ev;
 
-  // título do modal = alias (ou label)
+  const item = getItemById(ev.itemId);
+
   const title = getDisplayName(ev);
 
+  const cardName = (ev.itemName || "—").trim();
   const pos = getPosFromEvent(ev);
   const when = fmtDateOnly(ev.at);
   const commName = getComunicacaoName(ev);
 
-  const bodyHTML =
-    `<div class="mb-journey">${escapeHTML(ev.itemName || "—")}</div>
-     <div class="mb-date">${escapeHTML(`${pos} (PUSH) - ${when}`)}</div>
-     <div class="mb-push">${escapeHTML(commName)}</div>`;
+  const counts = item ? getChannelCountsForItem(item) : "";
+  const countsSuffix = counts ? ` | ${counts}` : "";
+
+  const bodyHTML = `
+    <div class="mb-journey">${escapeHTML(cardName)}</div>
+    <div class="mb-date">${escapeHTML(`${pos} (PUSH) - ${when}${countsSuffix}`)}</div>
+    <div class="mb-push">${escapeHTML(commName)}</div>
+  `;
 
   openModalBase(title, bodyHTML);
 }
@@ -465,9 +512,8 @@ async function refresh() {
   renderCalendar();
 }
 
-// alias default = nome completo (linha 1 do card)
-function makeDefaultAlias(cardFullTitle) {
-  return String(cardFullTitle || "").trim() || "Card";
+function makeDefaultAlias(fullTitle) {
+  return String(fullTitle || "").trim() || "Card";
 }
 
 async function createFromCard() {
@@ -480,6 +526,7 @@ async function createFromCard() {
   const header = parseCardHeader(raw);
   const fullTitle = (header.headerLine || "").trim() || "Card";
   const name = header.displayName || header.headerLine || "Item";
+
   const parsed = parseCardChannels(raw, name);
 
   for (const ev of (parsed.events || [])) {
@@ -496,8 +543,16 @@ async function createFromCard() {
     notes: "",
     createdAt,
     updatedAt: createdAt,
+
     journeyDisabled: false,
     journeyDisabledAt: "",
+
+    channelCounts: parsed.channelCounts || {
+      push: (parsed.events || []).length,
+      banner: 0,
+      mktScreen: 0
+    },
+
     events: parsed.events || []
   };
 
@@ -516,6 +571,238 @@ function shiftMonth(delta) {
 function gotoToday() {
   state.monthCursor = startOfMonth(new Date());
   renderCalendar();
+}
+
+// ---------- Export / Import ----------
+const EXPORT_MAGIC = "ativas-extract";
+const EXPORT_SCHEMA = 1;
+
+function sanitizeItemsForExport(items) {
+  // “mínimo essencial” para reconstruir:
+  // - id, name (pra aparecer no modal)
+  // - journeyDisabled (+journeyDisabledAt)
+  // - channelCounts
+  // - events: somente campos que você usa
+  return (items || []).map(it => ({
+    id: String(it.id || "").trim() || uuid(),
+    name: String(it.name || "").trim() || "Item",
+    cardUrl: String(it.cardUrl || ""),
+    journeyDisabled: it.journeyDisabled === true,
+    journeyDisabledAt: String(it.journeyDisabledAt || ""),
+    channelCounts: {
+      push: Number(it?.channelCounts?.push ?? 0) || 0,
+      banner: Number(it?.channelCounts?.banner ?? 0) || 0,
+      mktScreen: Number(it?.channelCounts?.mktScreen ?? 0) || 0
+    },
+    events: (it.events || [])
+      .filter(e => e && e.space === "journey" && e.channel === "push" && e.at)
+      .map(e => ({
+        id: String(e.id || ""),
+        space: "journey",
+        channel: "push",
+        kind: String(e.kind || "touch"),
+        at: String(e.at || ""),
+        label: String(e.label || ""),
+        alias: String(e.alias || ""),
+        meta: {
+          posicaoJornada: String(e?.meta?.posicaoJornada || ""),
+          nomeComunicacao: String(e?.meta?.nomeComunicacao || "")
+        }
+      }))
+  }));
+}
+
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function exportBackup() {
+  // garante que qualquer alias em edição vá pro DB antes do export
+  await saveAliasIfDirty();
+
+  const items = await dbGetAllItems();
+  const minimal = sanitizeItemsForExport(items);
+
+  const payload = {
+    magic: EXPORT_MAGIC,
+    schema: EXPORT_SCHEMA,
+    exportedAt: nowISO(),
+    items: minimal
+  };
+
+  // JSON minificado = menor possível
+  const json = JSON.stringify(payload);
+
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+
+  const filename = `ativas_extract_backup_${y}${m}${day}_${hh}${mm}.json`;
+  downloadTextFile(filename, json);
+}
+
+function isValidBackup(obj) {
+  if (!obj || typeof obj !== "object") return false;
+  if (obj.magic !== EXPORT_MAGIC) return false;
+  if (obj.schema !== EXPORT_SCHEMA) return false;
+  if (!Array.isArray(obj.items)) return false;
+  return true;
+}
+
+function normalizeImportedItem(raw) {
+  const id = String(raw?.id || "").trim() || uuid();
+  const name = String(raw?.name || "").trim() || "Item";
+
+  const channelCounts = raw?.channelCounts || {};
+  const cc = {
+    push: Number(channelCounts.push ?? 0) || 0,
+    banner: Number(channelCounts.banner ?? 0) || 0,
+    mktScreen: Number(channelCounts.mktScreen ?? 0) || 0
+  };
+
+  const events = Array.isArray(raw?.events) ? raw.events : [];
+  const normalizedEvents = events
+    .filter(e => e && e.at)
+    .map(e => ({
+      id: String(e.id || "").trim() || ("ev_" + uuid()),
+      space: "journey",
+      channel: "push",
+      kind: String(e.kind || "touch"),
+      at: String(e.at || ""),
+      label: String(e.label || ""),
+      alias: String(e.alias || ""),
+      meta: {
+        posicaoJornada: String(e?.meta?.posicaoJornada || ""),
+        nomeComunicacao: String(e?.meta?.nomeComunicacao || "")
+      }
+    }))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+
+  // se contagem push veio 0, recalcula pelo que chegou
+  if (!cc.push) cc.push = normalizedEvents.length;
+
+  const createdAt = String(raw?.createdAt || "") || nowISO();
+  const updatedAt = String(raw?.updatedAt || "") || nowISO();
+
+  return {
+    id,
+    name,
+    cardUrl: String(raw?.cardUrl || ""),
+    notes: String(raw?.notes || ""),
+    createdAt,
+    updatedAt,
+    journeyDisabled: raw?.journeyDisabled === true,
+    journeyDisabledAt: String(raw?.journeyDisabledAt || ""),
+    channelCounts: cc,
+    events: normalizedEvents
+  };
+}
+
+async function importBackupFromText(jsonText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    alert("Arquivo inválido: não é um JSON.");
+    return;
+  }
+
+  if (!isValidBackup(parsed)) {
+    alert("Backup inválido (magic/schema).");
+    return;
+  }
+
+  const incoming = parsed.items || [];
+  const normalized = incoming.map(normalizeImportedItem);
+
+  const mode = prompt(
+    "Importar backup:\n\nDigite 1 para SUBSTITUIR tudo (apaga o atual)\nDigite 2 para MESCLAR (mantém o atual e adiciona/atualiza por ID)\n\nPadrão: 2",
+    "2"
+  );
+
+  const doReplace = String(mode || "2").trim() === "1";
+
+  if (doReplace) {
+    const ok = confirm("Isso vai APAGAR tudo que está salvo localmente e substituir pelo backup. Continuar?");
+    if (!ok) return;
+    await dbClearAll();
+  }
+
+  // Merge por ID (ou substitui total já que limpou)
+  // Regra merge:
+  // - se já existe o item id, atualiza campos + faz merge de eventos por id
+  // - eventos: mantém os que existem e atualiza os do import; adiciona os novos
+  const existing = await dbGetAllItems();
+  const byId = new Map(existing.map(it => [it.id, it]));
+
+  for (const it of normalized) {
+    const cur = byId.get(it.id);
+
+    if (!cur) {
+      await dbPutItem(it);
+      continue;
+    }
+
+    // merge “seguro”
+    const merged = {
+      ...cur,
+      name: it.name || cur.name,
+      cardUrl: it.cardUrl || cur.cardUrl,
+      journeyDisabled: it.journeyDisabled === true,
+      journeyDisabledAt: it.journeyDisabledAt || cur.journeyDisabledAt,
+      channelCounts: it.channelCounts || cur.channelCounts,
+      updatedAt: nowISO()
+    };
+
+    // merge events por id
+    const curEvents = Array.isArray(cur.events) ? cur.events : [];
+    const evMap = new Map(curEvents.map(e => [e.id, e]));
+
+    for (const e of (it.events || [])) {
+      const prev = evMap.get(e.id);
+      if (!prev) {
+        evMap.set(e.id, e);
+      } else {
+        evMap.set(e.id, {
+          ...prev,
+          ...e,
+          meta: { ...(prev.meta || {}), ...(e.meta || {}) },
+          // mantém alias importado se vier preenchido, senão preserva o atual
+          alias: (String(e.alias || "").trim() ? e.alias : (prev.alias || ""))
+        });
+      }
+    }
+
+    merged.events = Array.from(evMap.values()).sort((a, b) => new Date(a.at) - new Date(b.at));
+
+    // se contagem push for 0, recalcula
+    if (!merged.channelCounts) merged.channelCounts = { push: merged.events.length, banner: 0, mktScreen: 0 };
+    if (!merged.channelCounts.push) merged.channelCounts.push = merged.events.length;
+
+    await dbPutItem(merged);
+  }
+
+  await refresh();
+  alert("Import concluído.");
+}
+
+async function importBackupFromFile(file) {
+  if (!file) return;
+  const text = await file.text();
+  await importBackupFromText(text);
 }
 
 // ---------- Bindings ----------
@@ -546,6 +833,22 @@ $("btnWipeAll").addEventListener("click", async () => {
   if (!ok) return;
   await dbClearAll();
   await refresh();
+});
+
+// Export/Import UI
+$("btnExport")?.addEventListener("click", exportBackup);
+
+$("btnImport")?.addEventListener("click", () => {
+  const inp = $("fileImport");
+  if (!inp) return;
+  inp.value = ""; // permite importar o mesmo arquivo de novo
+  inp.click();
+});
+
+$("fileImport")?.addEventListener("change", async (e) => {
+  const file = e.target?.files?.[0];
+  if (!file) return;
+  await importBackupFromFile(file);
 });
 
 // init

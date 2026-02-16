@@ -27,7 +27,7 @@ export function parseCardHeader(rawText) {
 /**
  * Parser mix (fase calendário):
  * - extrai Push (COMUNICAÇÃO ... (PUSH)) e transforma em events
- * - ignora banner/mktscreen nesta fase
+ * - CONTABILIZA quantas COMUNICAÇÕES por tipo (push/banner/mktscreen) para exibir no modal
  */
 export function parseCardChannels(rawText, itemNameForLabels = "") {
   const lines = String(rawText || "")
@@ -38,6 +38,8 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
   let current = null;
 
   const pushes = [];
+  let bannerCount = 0;
+  let mktScreenCount = 0;
 
   const commitCurrent = () => {
     if (!current) return;
@@ -52,13 +54,21 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
     const comm = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+.*\(([^)]+)\)/i);
     if (comm) {
       commitCurrent();
-      const ch = (comm[1] || "").toLowerCase();
-      if (ch.includes("push")) section = "push";
-      else if (ch.includes("banner")) section = "banner";
-      else if (ch.includes("mktscreen") || ch.includes("marketing") || ch.includes("mkt")) section = "mktscreen";
-      else section = null;
 
-      if (section === "push") current = { posicaoJornada:"", dataInicio:null, nomeComunicacao:"" };
+      const ch = (comm[1] || "").toLowerCase();
+      if (ch.includes("push")) {
+        section = "push";
+        current = { posicaoJornada: "", dataInicio: null, nomeComunicacao: "" };
+      } else if (ch.includes("banner")) {
+        section = "banner";
+        bannerCount += 1;
+      } else if (ch.includes("mktscreen") || ch.includes("marketing") || ch.includes("mkt")) {
+        section = "mktscreen";
+        mktScreenCount += 1; // cada "COMUNICAÇÃO ... (MKTSCREEN)" conta 1
+      } else {
+        section = null;
+      }
+
       continue;
     }
 
@@ -69,7 +79,7 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       const di = line.match(/^dataInicio:\s*(.+)$/i);
       if (di) {
         const dt = parseAnyISOish(di[1].trim());
-        if (dt) current.dataInicio = dt.toISOString(); // hora não importa, mas ok manter
+        if (dt) current.dataInicio = dt.toISOString();
         continue;
       }
 
@@ -87,7 +97,7 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
   const events = [];
 
   for (const p of pushes) {
-    if (!p.dataInicio) continue; // se não tem data (AON), a gente trata no futuro
+    if (!p.dataInicio) continue; // AON sem data -> futuro
     const pos = p.posicaoJornada || "";
     const nome = p.nomeComunicacao || "";
     const label = nome ? `Push ${pos} — ${nome}`.trim() : `Push ${pos}`.trim();
@@ -102,21 +112,22 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       kind: "touch",
       at: p.dataInicio,
 
-      // label “oficial” do evento (original)
       label,
-
-      // meta para o modal (originais)
       meta: {
         posicaoJornada: pos,
         nomeComunicacao: nome
       },
-
-      // apelido manual (por evento)
       alias: ""
     });
   }
 
-  events.sort((a,b) => new Date(a.at) - new Date(b.at));
+  events.sort((a, b) => new Date(a.at) - new Date(b.at));
 
-  return { events };
+  const channelCounts = {
+    push: pushes.length,
+    banner: bannerCount,
+    mktScreen: mktScreenCount
+  };
+
+  return { events, channelCounts };
 }
