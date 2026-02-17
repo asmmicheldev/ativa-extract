@@ -559,7 +559,6 @@ function getOfferPos(ofr) {
 function fmtOfferLine2(ofr) {
   const ch = String(ofr.channel || "").toUpperCase();
 
-  // MktScreen: NÃO tem posição e NÃO mostra "BLOCOS:"
   if (ofr.channel === "mktscreen") {
     const blocks = Number(ofr?.meta?.blocksCount ?? 0) || 0;
     return `${blocks || "—"} (${ch})`;
@@ -714,27 +713,51 @@ async function createFromCard() {
   const fullTitle = (header.headerLine || "").trim() || "Card";
   const name = header.displayName || header.headerLine || "Item";
 
+  // 1) parse JOURNEY (calendário)
   const parsed = parseCardChannels(raw, name);
 
-  if (parsed?.isPontual === false) {
+  // 2) parse OFFERS/MKTSCREEN
+  const parsedOffers = parseCardOffers(raw, name);
+
+  // regra pontual: se qualquer parser marcar como não pontual, bloqueia
+  // (os dois usam detectPontual, mas mantemos defensivo)
+  if (parsed?.isPontual === false || parsedOffers?.isPontual === false) {
     alert("Este card não foi adicionado: identificado como ALWAYS-ON (não pontual).");
     return;
   }
 
-  if (!parsed?.events?.length) {
-    alert("Nada para adicionar: não encontrei comunicações de Jornada pontuais (Push/Email/WhatsApp/SMS) com dataInicio.");
+  const hasJourney = Array.isArray(parsed?.events) && parsed.events.length > 0;
+  const hasOffers = Array.isArray(parsedOffers?.offers) && parsedOffers.offers.length > 0;
+
+  // NOVA REGRA:
+  // só bloqueia se não existir NADA para salvar
+  if (!hasJourney && !hasOffers) {
+    alert("Nada para adicionar: não encontrei eventos de Jornada nem Offers/MktScreen neste card.");
     return;
   }
 
-  for (const ev of (parsed.events || [])) {
-    if (!ev.alias || !String(ev.alias).trim()) {
-      ev.alias = makeDefaultAlias(fullTitle);
+  // alias default só faz sentido para journey
+  if (hasJourney) {
+    for (const ev of (parsed.events || [])) {
+      if (!ev.alias || !String(ev.alias).trim()) {
+        ev.alias = makeDefaultAlias(fullTitle);
+      }
     }
   }
 
-  const parsedOffers = parseCardOffers(raw, name);
-
   const createdAt = nowISO();
+
+  // channelCounts só de journey (se não tiver journey, zera)
+  const safeEvents = hasJourney ? (parsed.events || []) : [];
+  const channelCounts = hasJourney
+    ? (parsed.channelCounts || {
+        push: safeEvents.filter(e => e.channel === "push").length,
+        email: safeEvents.filter(e => e.channel === "email").length,
+        whatsapp: safeEvents.filter(e => e.channel === "whatsapp").length,
+        sms: safeEvents.filter(e => e.channel === "sms").length
+      })
+    : { push: 0, email: 0, whatsapp: 0, sms: 0 };
+
   const item = {
     id: uuid(),
     name,
@@ -746,15 +769,10 @@ async function createFromCard() {
     journeyDisabled: false,
     journeyDisabledAt: "",
 
-    channelCounts: parsed.channelCounts || {
-      push: (parsed.events || []).filter(e => e.channel === "push").length,
-      email: (parsed.events || []).filter(e => e.channel === "email").length,
-      whatsapp: (parsed.events || []).filter(e => e.channel === "whatsapp").length,
-      sms: (parsed.events || []).filter(e => e.channel === "sms").length
-    },
+    channelCounts,
+    events: safeEvents,
 
-    events: parsed.events || [],
-    offers: parsedOffers?.offers || []
+    offers: hasOffers ? (parsedOffers.offers || []) : []
   };
 
   await dbPutItem(item);
@@ -868,7 +886,7 @@ function isValidBackup(obj) {
   if (!obj || typeof obj !== "object") return false;
   if (obj.magic !== EXPORT_MAGIC) return false;
   if (!Array.isArray(obj.items)) return false;
-  if (![1,2].includes(Number(obj.schema))) return false;
+  if (![1, 2].includes(Number(obj.schema))) return false;
   return true;
 }
 
@@ -903,6 +921,7 @@ function normalizeImportedItem(raw) {
     .filter(e => ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
     .sort((a, b) => new Date(a.at) - new Date(b.at));
 
+  // recalcula counts se vier vazio
   const anyCount = Object.values(cc).some(v => Number(v) > 0);
   if (!anyCount) {
     cc.push = 0; cc.email = 0; cc.whatsapp = 0; cc.sms = 0;
@@ -927,7 +946,7 @@ function normalizeImportedItem(raw) {
       blocksCount: Number(o?.meta?.blocksCount ?? 0) || 0,
       deeplink: String(o?.meta?.deeplink || "")
     }
-  })).filter(o => ["banner","inapp","mktscreen"].includes(String(o.channel || "")));
+  })).filter(o => ["banner", "inapp", "mktscreen"].includes(String(o.channel || "")));
 
   const createdAt = String(raw?.createdAt || "") || nowISO();
   const updatedAt = String(raw?.updatedAt || "") || nowISO();
@@ -1027,9 +1046,10 @@ async function importBackupFromText(jsonText) {
     }
 
     merged.offers = Array.from(ofMap.values())
-      .filter(o => o && ["banner","inapp","mktscreen"].includes(String(o.channel || "")));
+      .filter(o => o && ["banner", "inapp", "mktscreen"].includes(String(o.channel || "")));
 
-    const counts = { push:0,email:0,whatsapp:0,sms:0 };
+    // recalcula counts de journey
+    const counts = { push: 0, email: 0, whatsapp: 0, sms: 0 };
     for (const e of (merged.events || [])) {
       const k = String(e.channel || "push");
       counts[k] = (counts[k] || 0) + 1;
