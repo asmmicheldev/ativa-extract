@@ -1,4 +1,4 @@
-// js/db.js
+// js/db.js (COMPLETO)
 const DB_NAME = "ativas_extract_db_v1";
 const DB_VERSION = 1;
 const STORE = "items";

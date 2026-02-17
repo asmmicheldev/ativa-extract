@@ -1,4 +1,4 @@
-// js/utils.js
+// js/utils.js (COMPLETO)
 export function uuid() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
@@ -32,24 +32,6 @@ export function parseAnyISOish(raw) {
   }
 
   return null;
-}
-
-export function fmtDateTime(d) {
-  if (!d) return "—";
-  const dt = (d instanceof Date) ? d : new Date(d);
-  if (isNaN(dt.getTime())) return "—";
-  return dt.toLocaleString("pt-BR", {
-    year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"
-  });
-}
-
-export function fmtTimeHHMM(d) {
-  if (!d) return "—";
-  const dt = (d instanceof Date) ? d : new Date(d);
-  if (isNaN(dt.getTime())) return "—";
-  const hh = String(dt.getHours()).padStart(2, "0");
-  const mm = String(dt.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
 }
 
 // chave local yyyy-mm-dd (sem UTC shift)

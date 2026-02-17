@@ -1,7 +1,13 @@
-// js/app.js
+// js/app.js (COMPLETO)
+// Regras:
+// - Calendário = APENAS eventos disparados por JORNADAS
+// - APENAS cards PONTUAIS
+// - IGNORAR banners e InApp (Offers) por enquanto
 import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
 import { parseCardHeader, parseCardChannels } from "./parsers.js";
 import { uuid, nowISO, dayKeyLocal, startOfMonth, endOfMonth, addDays, clampText } from "./utils.js";
+
+const ALLOWED_JOURNEY_CHANNELS = new Set(["push", "email", "whatsapp", "sms"]);
 
 let state = {
   items: [],
@@ -18,19 +24,6 @@ function todayStartLocal() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
-}
-
-function fmtDateTime(d) {
-  if (!d) return "—";
-  const dt = (d instanceof Date) ? d : new Date(d);
-  if (isNaN(dt.getTime())) return "—";
-  return dt.toLocaleString("pt-BR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
 }
 
 function fmtDateOnly(d) {
@@ -51,14 +44,14 @@ function getDisplayName(ev) {
   if (a) return a;
   const card = (ev?.itemName || "").trim();
   if (card) return card;
-  return (ev?.label || "Push").trim();
+  return (ev?.label || "Evento").trim();
 }
 
 function getPosFromEvent(ev) {
   const pos = (ev?.meta?.posicaoJornada || "").trim();
   if (pos) return pos;
   const m = String(ev?.label || "").match(/\bP\d+\b/i);
-  return m ? m[0].toUpperCase() : "P?";
+  return m ? m[0].toUpperCase() : "—";
 }
 
 function getComunicacaoName(ev) {
@@ -66,7 +59,7 @@ function getComunicacaoName(ev) {
   if (n) return n;
 
   const label = String(ev?.label || "").trim();
-  const cleaned = label.replace(/^Push\s+\w+\s+—\s+/i, "").trim();
+  const cleaned = label.replace(/^[A-Z]+\s+\S+\s+—\s+/i, "").trim();
   return cleaned || label || "—";
 }
 
@@ -84,7 +77,9 @@ function computeCardLastAt(item) {
   let max = null;
   for (const ev of (item.events || [])) {
     if (!ev?.at) continue;
-    if (ev.space !== "journey" || ev.channel !== "push") continue;
+    if (ev.space !== "journey") continue;
+    if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) continue;
+
     const dt = new Date(ev.at);
     if (isNaN(dt.getTime())) continue;
     if (!max || dt > max) max = dt;
@@ -303,6 +298,11 @@ function monthLabel(d) {
 }
 
 function passesFilters(ev, itemName) {
+  // hard rules (não negociáveis)
+  if (ev.space !== "journey") return false;
+  if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) return false;
+
+  // filtros do UI
   if (state.filterSpace !== "all" && ev.space !== state.filterSpace) return false;
   if (state.filterChannel !== "all" && ev.channel !== state.filterChannel) return false;
 
@@ -326,7 +326,6 @@ function collectEventsForMonth() {
 
     for (const ev of (it.events || [])) {
       if (!ev?.at) continue;
-      if (ev.space !== "journey" || ev.channel !== "push") continue;
       if (!passesFilters(ev, itemName)) continue;
 
       const dt = new Date(ev.at);
@@ -420,7 +419,7 @@ function renderCalendar() {
 
     for (const ev of show) {
       const pill = document.createElement("div");
-      pill.className = `pill push ${statusClass(ev.cardStatus)}`;
+      pill.className = `pill ${String(ev.channel || "push")} ${statusClass(ev.cardStatus)}`;
 
       const t1 = document.createElement("div");
       t1.className = "t1";
@@ -460,16 +459,19 @@ function renderCalendar() {
 
 // ---------- Modal content ----------
 function getChannelCountsForItem(item) {
-  const cc = item?.channelCounts || null;
-  const pushN = (cc && Number.isFinite(cc.push)) ? cc.push : (item?.events || []).filter(e => e?.space === "journey" && e?.channel === "push").length;
-  const bannerN = (cc && Number.isFinite(cc.banner)) ? cc.banner : 0;
-  const mktN = (cc && Number.isFinite(cc.mktScreen)) ? cc.mktScreen : 0;
+  const cc = item?.channelCounts || {};
+  const pairs = [
+    ["push", "Push"],
+    ["email", "Email"],
+    ["whatsapp", "WhatsApp"],
+    ["sms", "SMS"]
+  ];
 
   const parts = [];
-  if (pushN > 0) parts.push(`Push (${pushN})`);
-  if (bannerN > 0) parts.push(`Banner (${bannerN})`);
-  if (mktN > 0) parts.push(`MktScreen (${mktN})`);
-
+  for (const [k, label] of pairs) {
+    const n = Number(cc?.[k] ?? 0) || 0;
+    if (n > 0) parts.push(`${label} (${n})`);
+  }
   return parts.join(" ");
 }
 
@@ -477,7 +479,6 @@ function openEventModal(ev) {
   currentModalEvent = ev;
 
   const item = getItemById(ev.itemId);
-
   const title = getDisplayName(ev);
 
   const cardName = (ev.itemName || "—").trim();
@@ -488,9 +489,11 @@ function openEventModal(ev) {
   const counts = item ? getChannelCountsForItem(item) : "";
   const countsSuffix = counts ? ` | ${counts}` : "";
 
+  const ch = String(ev.channel || "push").toUpperCase();
+
   const bodyHTML = `
     <div class="mb-journey">${escapeHTML(cardName)}</div>
-    <div class="mb-date">${escapeHTML(`${pos} (PUSH) - ${when}${countsSuffix}`)}</div>
+    <div class="mb-date">${escapeHTML(`${pos} (${ch}) - ${when}${countsSuffix}`)}</div>
     <div class="mb-push">${escapeHTML(commName)}</div>
   `;
 
@@ -527,7 +530,18 @@ async function createFromCard() {
   const fullTitle = (header.headerLine || "").trim() || "Card";
   const name = header.displayName || header.headerLine || "Item";
 
+  // parser já filtra por: (1) pontual (2) apenas canais de jornada (3) ignora banner/inapp
   const parsed = parseCardChannels(raw, name);
+
+  if (parsed?.isPontual === false) {
+    alert("Este card não foi adicionado: identificado como ALWAYS-ON (não pontual).");
+    return;
+  }
+
+  if (!parsed?.events?.length) {
+    alert("Nada para adicionar: não encontrei comunicações de Jornada pontuais (Push/Email/WhatsApp/SMS) com dataInicio.");
+    return;
+  }
 
   for (const ev of (parsed.events || [])) {
     if (!ev.alias || !String(ev.alias).trim()) {
@@ -547,10 +561,12 @@ async function createFromCard() {
     journeyDisabled: false,
     journeyDisabledAt: "",
 
+    // SOMENTE os canais permitidos (journey)
     channelCounts: parsed.channelCounts || {
-      push: (parsed.events || []).length,
-      banner: 0,
-      mktScreen: 0
+      push: (parsed.events || []).filter(e => e.channel === "push").length,
+      email: (parsed.events || []).filter(e => e.channel === "email").length,
+      whatsapp: (parsed.events || []).filter(e => e.channel === "whatsapp").length,
+      sms: (parsed.events || []).filter(e => e.channel === "sms").length
     },
 
     events: parsed.events || []
@@ -578,11 +594,6 @@ const EXPORT_MAGIC = "ativas-extract";
 const EXPORT_SCHEMA = 1;
 
 function sanitizeItemsForExport(items) {
-  // “mínimo essencial” para reconstruir:
-  // - id, name (pra aparecer no modal)
-  // - journeyDisabled (+journeyDisabledAt)
-  // - channelCounts
-  // - events: somente campos que você usa
   return (items || []).map(it => ({
     id: String(it.id || "").trim() || uuid(),
     name: String(it.name || "").trim() || "Item",
@@ -591,15 +602,16 @@ function sanitizeItemsForExport(items) {
     journeyDisabledAt: String(it.journeyDisabledAt || ""),
     channelCounts: {
       push: Number(it?.channelCounts?.push ?? 0) || 0,
-      banner: Number(it?.channelCounts?.banner ?? 0) || 0,
-      mktScreen: Number(it?.channelCounts?.mktScreen ?? 0) || 0
+      email: Number(it?.channelCounts?.email ?? 0) || 0,
+      whatsapp: Number(it?.channelCounts?.whatsapp ?? 0) || 0,
+      sms: Number(it?.channelCounts?.sms ?? 0) || 0
     },
     events: (it.events || [])
-      .filter(e => e && e.space === "journey" && e.channel === "push" && e.at)
+      .filter(e => e && e.space === "journey" && e.at && ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
       .map(e => ({
         id: String(e.id || ""),
         space: "journey",
-        channel: "push",
+        channel: String(e.channel || "push"),
         kind: String(e.kind || "touch"),
         at: String(e.at || ""),
         label: String(e.label || ""),
@@ -627,7 +639,6 @@ function downloadTextFile(filename, text) {
 }
 
 async function exportBackup() {
-  // garante que qualquer alias em edição vá pro DB antes do export
   await saveAliasIfDirty();
 
   const items = await dbGetAllItems();
@@ -640,7 +651,6 @@ async function exportBackup() {
     items: minimal
   };
 
-  // JSON minificado = menor possível
   const json = JSON.stringify(payload);
 
   const d = new Date();
@@ -669,8 +679,9 @@ function normalizeImportedItem(raw) {
   const channelCounts = raw?.channelCounts || {};
   const cc = {
     push: Number(channelCounts.push ?? 0) || 0,
-    banner: Number(channelCounts.banner ?? 0) || 0,
-    mktScreen: Number(channelCounts.mktScreen ?? 0) || 0
+    email: Number(channelCounts.email ?? 0) || 0,
+    whatsapp: Number(channelCounts.whatsapp ?? 0) || 0,
+    sms: Number(channelCounts.sms ?? 0) || 0
   };
 
   const events = Array.isArray(raw?.events) ? raw.events : [];
@@ -679,7 +690,7 @@ function normalizeImportedItem(raw) {
     .map(e => ({
       id: String(e.id || "").trim() || ("ev_" + uuid()),
       space: "journey",
-      channel: "push",
+      channel: String(e.channel || "push"),
       kind: String(e.kind || "touch"),
       at: String(e.at || ""),
       label: String(e.label || ""),
@@ -689,10 +700,18 @@ function normalizeImportedItem(raw) {
         nomeComunicacao: String(e?.meta?.nomeComunicacao || "")
       }
     }))
+    .filter(e => ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
     .sort((a, b) => new Date(a.at) - new Date(b.at));
 
-  // se contagem push veio 0, recalcula pelo que chegou
-  if (!cc.push) cc.push = normalizedEvents.length;
+  // recalcula counts se vier vazio
+  const anyCount = Object.values(cc).some(v => Number(v) > 0);
+  if (!anyCount) {
+    cc.push = 0; cc.email = 0; cc.whatsapp = 0; cc.sms = 0;
+    for (const e of normalizedEvents) {
+      const k = String(e.channel || "push");
+      cc[k] = (cc[k] || 0) + 1;
+    }
+  }
 
   const createdAt = String(raw?.createdAt || "") || nowISO();
   const updatedAt = String(raw?.updatedAt || "") || nowISO();
@@ -741,10 +760,6 @@ async function importBackupFromText(jsonText) {
     await dbClearAll();
   }
 
-  // Merge por ID (ou substitui total já que limpou)
-  // Regra merge:
-  // - se já existe o item id, atualiza campos + faz merge de eventos por id
-  // - eventos: mantém os que existem e atualiza os do import; adiciona os novos
   const existing = await dbGetAllItems();
   const byId = new Map(existing.map(it => [it.id, it]));
 
@@ -756,7 +771,6 @@ async function importBackupFromText(jsonText) {
       continue;
     }
 
-    // merge “seguro”
     const merged = {
       ...cur,
       name: it.name || cur.name,
@@ -767,7 +781,6 @@ async function importBackupFromText(jsonText) {
       updatedAt: nowISO()
     };
 
-    // merge events por id
     const curEvents = Array.isArray(cur.events) ? cur.events : [];
     const evMap = new Map(curEvents.map(e => [e.id, e]));
 
@@ -780,17 +793,22 @@ async function importBackupFromText(jsonText) {
           ...prev,
           ...e,
           meta: { ...(prev.meta || {}), ...(e.meta || {}) },
-          // mantém alias importado se vier preenchido, senão preserva o atual
           alias: (String(e.alias || "").trim() ? e.alias : (prev.alias || ""))
         });
       }
     }
 
-    merged.events = Array.from(evMap.values()).sort((a, b) => new Date(a.at) - new Date(b.at));
+    merged.events = Array.from(evMap.values())
+      .filter(e => e && e.at && ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
+      .sort((a, b) => new Date(a.at) - new Date(b.at));
 
-    // se contagem push for 0, recalcula
-    if (!merged.channelCounts) merged.channelCounts = { push: merged.events.length, banner: 0, mktScreen: 0 };
-    if (!merged.channelCounts.push) merged.channelCounts.push = merged.events.length;
+    // counts (recalcula)
+    const counts = { push:0,email:0,whatsapp:0,sms:0 };
+    for (const e of (merged.events || [])) {
+      const k = String(e.channel || "push");
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    merged.channelCounts = { ...counts };
 
     await dbPutItem(merged);
   }
@@ -835,13 +853,12 @@ $("btnWipeAll").addEventListener("click", async () => {
   await refresh();
 });
 
-// Export/Import UI
 $("btnExport")?.addEventListener("click", exportBackup);
 
 $("btnImport")?.addEventListener("click", () => {
   const inp = $("fileImport");
   if (!inp) return;
-  inp.value = ""; // permite importar o mesmo arquivo de novo
+  inp.value = "";
   inp.click();
 });
 
