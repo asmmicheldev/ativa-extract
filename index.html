@@ -1,4 +1,3 @@
-<!-- index.html (COMPLETO ALTERADO) -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -15,7 +14,7 @@
 
     <div class="topbar-actions">
       <div class="tools">
-        <button id="btnWipeAll" class="btn btn-danger" type="button">Apagar tudo (local)</button>
+        <!-- REMOVIDO: Apagar tudo (local) -->
         <button id="btnExport" class="btn btn-secondary" type="button">Exportar</button>
         <button id="btnImport" class="btn btn-secondary" type="button">Importar</button>
         <input id="fileImport" type="file" accept="application/json" class="hidden" />
@@ -35,15 +34,17 @@
     <!-- CARD BAR (entre header e calendário) -->
     <section class="cardbar panel">
       <div class="cardbar-row">
-        <textarea id="inputCard" class="textarea cardbar-textarea" placeholder="Cole aqui o texto do card da XP..."></textarea>
-        <button id="btnParseCreate" class="btn btn-secondary" type="button">Adicionar no calendário</button>
+        <!-- placeholder removido -->
+        <textarea id="inputCard" class="textarea cardbar-textarea"></textarea>
+        <!-- label trocado -->
+        <button id="btnParseCreate" class="btn btn-secondary" type="button">Adicionar</button>
       </div>
     </section>
 
     <section class="content">
       <div class="calendar">
-        <div class="panel-title">Journeys detectadas (local)</div>
-        <div id="journeysMeta" class="offers-meta">Total de journeys: 0</div>
+        <!-- título agora dinâmico -->
+        <div id="journeysTitle" class="panel-title">Journeys (0)</div>
 
         <div class="calendar-head">
           <div class="dow">Domingo</div>
@@ -64,14 +65,14 @@
 
       <div class="offers-wrap">
         <div class="panel">
-          <div class="panel-title">Offers detectadas (local)</div>
-          <div id="offersMeta" class="offers-meta">Total de offers: 0</div>
+          <!-- título agora dinâmico -->
+          <div id="offersTitle" class="panel-title">Offers (0)</div>
           <div id="offersList" class="offers-list"></div>
         </div>
 
         <div class="panel">
-          <div class="panel-title">Marketing Screens (Target) detectadas (local)</div>
-          <div id="mktMeta" class="offers-meta">Total de mkt screens: 0</div>
+          <!-- título agora dinâmico -->
+          <div id="mktTitle" class="panel-title">Target (0)</div>
           <div id="mktList" class="offers-list"></div>
         </div>
       </div>

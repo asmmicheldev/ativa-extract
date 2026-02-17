@@ -1,4 +1,3 @@
-// js/app.js (COMPLETO ALTERADO - SEM FILTROS/SEARCH/LIMPAR)
 import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
 import { parseCardHeader, parseCardChannels, parseCardOffers } from "./parsers.js";
 import { uuid, nowISO, dayKeyLocal, startOfMonth, endOfMonth, addDays, clampText } from "./utils.js";
@@ -423,8 +422,7 @@ function renderCalendar() {
   const grid = $("calendarGrid");
   grid.innerHTML = "";
 
-  const journeysMeta = $("journeysMeta");
-  if (journeysMeta) journeysMeta.textContent = `Total de journeys: 0`;
+  const journeysTitle = $("journeysTitle");
 
   const eventsMap = collectEventsForMonth();
   const dates = buildMonthGridDates(state.monthCursor);
@@ -503,7 +501,7 @@ function renderCalendar() {
   $("emptyHint").classList.toggle("hidden", eventsMap.size > 0);
 
   const totalAll = countJourneysGlobalAll();
-  if (journeysMeta) journeysMeta.textContent = `Total de journeys: ${totalAll}`;
+  if (journeysTitle) journeysTitle.textContent = `Journeys (${totalAll})`;
 }
 
 // ---------- Modal content (journey) ----------
@@ -627,11 +625,11 @@ function renderOffersLists() {
   offers.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
   mkts.sort((a, b) => String(a.itemFullTitle).localeCompare(String(b.itemFullTitle)));
 
-  const offersMeta = $("offersMeta");
-  if (offersMeta) offersMeta.textContent = `Total de offers: ${offers.length}`;
+  const offersTitle = $("offersTitle");
+  if (offersTitle) offersTitle.textContent = `Offers (${offers.length})`;
 
-  const mktMeta = $("mktMeta");
-  if (mktMeta) mktMeta.textContent = `Total de mkt screens: ${mkts.length}`;
+  const mktTitle = $("mktTitle");
+  if (mktTitle) mktTitle.textContent = `Target (${mkts.length})`;
 
   const renderGroupSubtitle = (host, text) => {
     const sub = document.createElement("div");
@@ -691,7 +689,7 @@ function renderOffersLists() {
     activeAlwaysOn.sort(byStartAsc);
     expired.sort(byEndDesc);
 
-    renderGroupSubtitle(offersHost, "Rodando (hoje)");
+    renderGroupSubtitle(offersHost, "Ativas");
     if (!activePontual.length) offersHost.insertAdjacentHTML("beforeend", `<div class="empty-hint">—</div>`);
     else for (const ofr of activePontual) renderPill(offersHost, ofr, offerBorderClass(ofr));
 
@@ -699,7 +697,7 @@ function renderOffersLists() {
     if (!activeAlwaysOn.length) offersHost.insertAdjacentHTML("beforeend", `<div class="empty-hint">—</div>`);
     else for (const ofr of activeAlwaysOn) renderPill(offersHost, ofr, offerBorderClass(ofr));
 
-    renderGroupSubtitle(offersHost, "Já terminou (expiradas)");
+    renderGroupSubtitle(offersHost, "Expiradas");
     if (!expired.length) offersHost.insertAdjacentHTML("beforeend", `<div class="empty-hint">—</div>`);
     else for (const ofr of expired) renderPill(offersHost, ofr, offerBorderClass(ofr));
   }
@@ -1170,13 +1168,6 @@ $("btnParseCreate").addEventListener("click", createFromCard);
 $("btnPrev").addEventListener("click", () => shiftMonth(-1));
 $("btnNext").addEventListener("click", () => shiftMonth(1));
 $("btnToday").addEventListener("click", gotoToday);
-
-$("btnWipeAll").addEventListener("click", async () => {
-  const ok = confirm("Apagar tudo que está salvo localmente neste navegador?");
-  if (!ok) return;
-  await dbClearAll();
-  await refresh();
-});
 
 $("btnExport")?.addEventListener("click", exportBackup);
 
