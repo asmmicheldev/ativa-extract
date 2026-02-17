@@ -35,6 +35,14 @@ function getItemById(id) {
   return state.items.find(x => x && x.id === id) || null;
 }
 
+function getFullCardTitle(item) {
+  // nome completo do card (headerLine original)
+  const ft = String(item?.fullTitle || "").trim();
+  if (ft) return ft;
+  const nm = String(item?.name || "").trim();
+  return nm || "—";
+}
+
 function getDisplayName(ev) {
   const a = (ev?.alias || "").trim();
   if (a) return a;
@@ -68,7 +76,7 @@ function escapeHTML(s) {
     .replaceAll("'", "&#039;");
 }
 
-// ---------- Status por card ----------
+// ---------- Status por card (journey) ----------
 function computeCardLastAt(item) {
   let max = null;
   for (const ev of (item.events || [])) {
@@ -97,6 +105,27 @@ function statusClass(status) {
   if (status === "disabled") return "status-disabled";
   if (status === "expired") return "status-expired";
   return "status-active";
+}
+
+// ---------- Status por offer ----------
+function isOfferExpired(ofr) {
+  // mkt screen não expira (não tem janela de data)
+  if (String(ofr?.channel || "") === "mktscreen") return false;
+
+  const end = String(ofr?.endAt || "").trim();
+  if (!end) return false;
+
+  const endDt = new Date(end);
+  if (isNaN(endDt.getTime())) return false;
+
+  // compara com "hoje 00:00 local" (se end < hoje, expirou)
+  const today0 = todayStartLocal();
+  return endDt < today0;
+}
+
+function offerBorderClass(ofr) {
+  // regra pedida: offers expirados => cinza (mesmo do disabled)
+  return isOfferExpired(ofr) ? "status-disabled" : "status-active";
 }
 
 // ---------- Modal state ----------
@@ -142,6 +171,7 @@ async function saveAliasIfDirty() {
     return;
   }
 
+  // só salva alias para journey
   if (currentModalEvent.space !== "journey") {
     aliasDirty = false;
     showSaving(false);
@@ -302,9 +332,11 @@ function monthLabel(d) {
 }
 
 function passesFilters(ev, itemName) {
+  // hard rules do CALENDÁRIO
   if (ev.space !== "journey") return false;
   if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) return false;
 
+  // filtros do UI
   if (state.filterSpace !== "all" && ev.space !== state.filterSpace) return false;
   if (state.filterChannel !== "all" && ev.channel !== state.filterChannel) return false;
 
@@ -544,7 +576,7 @@ function openDayModal(dayKey, entries) {
   });
 }
 
-// ---------- OFFERS lists (BANNER/INAPP) + MKTSCREEN ----------
+// ---------- OFFERS + MKTSCREEN ----------
 function inferPosFromText(s) {
   const m = String(s || "").match(/\b(P\d+)\b/i);
   return m ? m[1].toUpperCase() : "NA";
@@ -577,18 +609,18 @@ function renderOffersLists() {
   const mkts = [];
 
   for (const it of state.items) {
-    const cardName = (it.name || "Item").trim();
+    const cardFull = getFullCardTitle(it);
     const arr = Array.isArray(it.offers) ? it.offers : [];
 
     for (const ofr of arr) {
       const nm = (ofr?.name || ofr?.label || "").trim();
-      const hay = `${cardName} ${nm} ${ofr.channel || ""} ${ofr?.meta?.deeplink || ""}`.toLowerCase();
+      const hay = `${cardFull} ${nm} ${ofr.channel || ""} ${ofr?.meta?.deeplink || ""}`.toLowerCase();
       if (q && !hay.includes(q)) continue;
 
       const enriched = {
         ...ofr,
         itemId: it.id,
-        itemName: cardName
+        itemFullTitle: cardFull
       };
 
       if (String(ofr.channel) === "mktscreen") mkts.push(enriched);
@@ -597,7 +629,7 @@ function renderOffersLists() {
   }
 
   offers.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
-  mkts.sort((a, b) => String(a.itemName).localeCompare(String(b.itemName)));
+  mkts.sort((a, b) => String(a.itemFullTitle).localeCompare(String(b.itemFullTitle)));
 
   const offersMeta = $("offersMeta");
   if (offersMeta) offersMeta.textContent = `Total de offers: ${offers.length}`;
@@ -605,7 +637,7 @@ function renderOffersLists() {
   const mktMeta = $("mktMeta");
   if (mktMeta) mktMeta.textContent = `Total de mkt screens: ${mkts.length}`;
 
-  const renderBox = (hostId, arr, type) => {
+  const renderBox = (hostId, arr) => {
     const host = $(hostId);
     if (!host) return;
 
@@ -617,30 +649,14 @@ function renderOffersLists() {
 
     for (const ofr of arr) {
       const card = document.createElement("div");
-      card.className = `pill offer-card status-active`;
+      card.className = `pill ${offerBorderClass(ofr)}`;
 
+      // EXTERNO: somente nome completo do card
       const t1 = document.createElement("div");
       t1.className = "t1";
-      t1.textContent = clampText(ofr.itemName || "—", 95);
-
-      const t2 = document.createElement("div");
-      t2.className = "t2";
-      t2.textContent = clampText(fmtOfferLine2(ofr), 160);
+      t1.textContent = clampText(ofr.itemFullTitle || "—", 140);
 
       card.appendChild(t1);
-      card.appendChild(t2);
-
-      if (type === "mktscreen") {
-        const t3 = document.createElement("div");
-        t3.className = "t4";
-        t3.textContent = (ofr?.meta?.deeplink || "—");
-        card.appendChild(t3);
-      } else {
-        const t3 = document.createElement("div");
-        t3.className = "t3";
-        t3.textContent = clampText((ofr.name || ofr.label || "—"), 140);
-        card.appendChild(t3);
-      }
 
       card.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -651,16 +667,17 @@ function renderOffersLists() {
     }
   };
 
-  renderBox("offersList", offers, "offers");
-  renderBox("mktList", mkts, "mktscreen");
+  renderBox("offersList", offers);
+  renderBox("mktList", mkts);
 }
 
 function openOfferModal(ofr) {
+  // offers não tem "desativar jornada"
   $("btnDisableJourney")?.classList.add("hidden");
 
   currentModalEvent = ofr;
 
-  const cardName = (ofr.itemName || "—").trim();
+  const cardFull = (ofr.itemFullTitle || "—").trim();
   const ch = String(ofr.channel || "").toUpperCase();
 
   if (ofr.channel === "mktscreen") {
@@ -668,12 +685,12 @@ function openOfferModal(ofr) {
     const deeplink = (ofr?.meta?.deeplink || "—").trim();
 
     const bodyHTML = `
-      <div class="mb-journey">${escapeHTML(cardName)}</div>
+      <div class="mb-journey">${escapeHTML(cardFull)}</div>
       <div class="mb-date">${escapeHTML(`${blocks || "—"} (${ch})`)}</div>
       <div class="mb-push">${escapeHTML(deeplink)}</div>
     `;
 
-    openModalBase("MktScreen", bodyHTML);
+    openModalBase(cardFull, bodyHTML);
     return;
   }
 
@@ -683,12 +700,12 @@ function openOfferModal(ofr) {
   const nm = (ofr.name || ofr.label || "—").trim();
 
   const bodyHTML = `
-    <div class="mb-journey">${escapeHTML(cardName)}</div>
+    <div class="mb-journey">${escapeHTML(cardFull)}</div>
     <div class="mb-date">${escapeHTML(`${pos} (${ch}) | Início: ${ini} | Fim: ${fim}`)}</div>
     <div class="mb-push">${escapeHTML(nm)}</div>
   `;
 
-  openModalBase(nm, bodyHTML);
+  openModalBase(cardFull, bodyHTML);
 }
 
 // ---------- Data / actions ----------
@@ -713,14 +730,9 @@ async function createFromCard() {
   const fullTitle = (header.headerLine || "").trim() || "Card";
   const name = header.displayName || header.headerLine || "Item";
 
-  // 1) parse JOURNEY (calendário)
   const parsed = parseCardChannels(raw, name);
-
-  // 2) parse OFFERS/MKTSCREEN
   const parsedOffers = parseCardOffers(raw, name);
 
-  // regra pontual: se qualquer parser marcar como não pontual, bloqueia
-  // (os dois usam detectPontual, mas mantemos defensivo)
   if (parsed?.isPontual === false || parsedOffers?.isPontual === false) {
     alert("Este card não foi adicionado: identificado como ALWAYS-ON (não pontual).");
     return;
@@ -729,14 +741,11 @@ async function createFromCard() {
   const hasJourney = Array.isArray(parsed?.events) && parsed.events.length > 0;
   const hasOffers = Array.isArray(parsedOffers?.offers) && parsedOffers.offers.length > 0;
 
-  // NOVA REGRA:
-  // só bloqueia se não existir NADA para salvar
   if (!hasJourney && !hasOffers) {
     alert("Nada para adicionar: não encontrei eventos de Jornada nem Offers/MktScreen neste card.");
     return;
   }
 
-  // alias default só faz sentido para journey
   if (hasJourney) {
     for (const ev of (parsed.events || [])) {
       if (!ev.alias || !String(ev.alias).trim()) {
@@ -747,7 +756,6 @@ async function createFromCard() {
 
   const createdAt = nowISO();
 
-  // channelCounts só de journey (se não tiver journey, zera)
   const safeEvents = hasJourney ? (parsed.events || []) : [];
   const channelCounts = hasJourney
     ? (parsed.channelCounts || {
@@ -761,6 +769,7 @@ async function createFromCard() {
   const item = {
     id: uuid(),
     name,
+    fullTitle, // <-- NOVO: nome completo do card
     cardUrl: header.cardUrl || "",
     notes: "",
     createdAt,
@@ -800,6 +809,7 @@ function sanitizeItemsForExport(items) {
   return (items || []).map(it => ({
     id: String(it.id || "").trim() || uuid(),
     name: String(it.name || "").trim() || "Item",
+    fullTitle: String(it.fullTitle || ""), // <-- NOVO
     cardUrl: String(it.cardUrl || ""),
     journeyDisabled: it.journeyDisabled === true,
     journeyDisabledAt: String(it.journeyDisabledAt || ""),
@@ -893,6 +903,7 @@ function isValidBackup(obj) {
 function normalizeImportedItem(raw) {
   const id = String(raw?.id || "").trim() || uuid();
   const name = String(raw?.name || "").trim() || "Item";
+  const fullTitle = String(raw?.fullTitle || "").trim(); // <-- NOVO
 
   const channelCounts = raw?.channelCounts || {};
   const cc = {
@@ -921,7 +932,6 @@ function normalizeImportedItem(raw) {
     .filter(e => ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
     .sort((a, b) => new Date(a.at) - new Date(b.at));
 
-  // recalcula counts se vier vazio
   const anyCount = Object.values(cc).some(v => Number(v) > 0);
   if (!anyCount) {
     cc.push = 0; cc.email = 0; cc.whatsapp = 0; cc.sms = 0;
@@ -954,6 +964,7 @@ function normalizeImportedItem(raw) {
   return {
     id,
     name,
+    fullTitle, // <-- NOVO
     cardUrl: String(raw?.cardUrl || ""),
     notes: String(raw?.notes || ""),
     createdAt,
@@ -1010,6 +1021,7 @@ async function importBackupFromText(jsonText) {
     const merged = {
       ...cur,
       name: it.name || cur.name,
+      fullTitle: it.fullTitle || cur.fullTitle, // <-- NOVO
       cardUrl: it.cardUrl || cur.cardUrl,
       journeyDisabled: it.journeyDisabled === true,
       journeyDisabledAt: it.journeyDisabledAt || cur.journeyDisabledAt,
@@ -1048,7 +1060,6 @@ async function importBackupFromText(jsonText) {
     merged.offers = Array.from(ofMap.values())
       .filter(o => o && ["banner", "inapp", "mktscreen"].includes(String(o.channel || "")));
 
-    // recalcula counts de journey
     const counts = { push: 0, email: 0, whatsapp: 0, sms: 0 };
     for (const e of (merged.events || [])) {
       const k = String(e.channel || "push");
