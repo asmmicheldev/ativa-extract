@@ -36,7 +36,6 @@ function getItemById(id) {
 }
 
 function getFullCardTitle(item) {
-  // nome completo do card (headerLine original)
   const ft = String(item?.fullTitle || "").trim();
   if (ft) return ft;
   const nm = String(item?.name || "").trim();
@@ -76,6 +75,23 @@ function escapeHTML(s) {
     .replaceAll("'", "&#039;");
 }
 
+// ---------- ALWAYS-ON: pedir data quando faltar ----------
+function promptStartDateOnly() {
+  const v = prompt(
+    "Card com canais sem datas.\n\nDigite a DATA DE INÍCIO (YYYY-MM-DD):",
+    ""
+  );
+  const s = String(v || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+  return s;
+}
+
+function isoFromDateOnly(dateOnly, hh = 9, mm = 0) {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  const dt = new Date(y, m - 1, d, hh, mm, 0);
+  return dt.toISOString();
+}
+
 // ---------- Status por card (journey) ----------
 function computeCardLastAt(item) {
   let max = null;
@@ -109,7 +125,6 @@ function statusClass(status) {
 
 // ---------- Status por offer ----------
 function isOfferExpired(ofr) {
-  // mkt screen não expira (não tem janela de data)
   if (String(ofr?.channel || "") === "mktscreen") return false;
 
   const end = String(ofr?.endAt || "").trim();
@@ -123,13 +138,12 @@ function isOfferExpired(ofr) {
 }
 
 function offerBorderClass(ofr) {
-  // offers expirados => cinza (mesmo do disabled)
   return isOfferExpired(ofr) ? "status-disabled" : "status-active";
 }
 
 // ---------- Modal state ----------
 let modalBound = false;
-let currentModalEvent = null; // journey OU offer (só pra deletar card)
+let currentModalEvent = null;
 let aliasDirty = false;
 let saveTimer = null;
 
@@ -170,7 +184,6 @@ async function saveAliasIfDirty() {
     return;
   }
 
-  // só salva alias para journey
   if (currentModalEvent.space !== "journey") {
     aliasDirty = false;
     showSaving(false);
@@ -331,11 +344,9 @@ function monthLabel(d) {
 }
 
 function passesFilters(ev, itemName) {
-  // hard rules do CALENDÁRIO
   if (ev.space !== "journey") return false;
   if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) return false;
 
-  // filtros do UI
   if (state.filterSpace !== "all" && ev.space !== state.filterSpace) return false;
   if (state.filterChannel !== "all" && ev.channel !== state.filterChannel) return false;
 
@@ -358,7 +369,7 @@ function collectEventsForMonth() {
     const cardStatus = computeCardStatus(it);
 
     for (const ev of (it.events || [])) {
-      if (!ev?.at) continue;
+      if (!ev?.at) continue; // <- só entra no calendário se tiver data (após preenchimento)
       if (!passesFilters(ev, itemName)) continue;
 
       const dt = new Date(ev.at);
@@ -452,7 +463,8 @@ function renderCalendar() {
 
     for (const ev of show) {
       const pill = document.createElement("div");
-      pill.className = `pill ${String(ev.channel || "push")} ${statusClass(ev.cardStatus)}`;
+      const isAO = ev?.meta?.alwaysOn === true;
+      pill.className = `pill ${String(ev.channel || "push")} ${statusClass(ev.cardStatus)} ${isAO ? "always-on" : ""}`;
 
       const t1 = document.createElement("div");
       t1.className = "t1";
@@ -549,9 +561,10 @@ function openDayModal(dayKey, entries) {
     const when = fmtDateOnly(ev.at);
     const pos = getPosFromEvent(ev);
     const commName = getComunicacaoName(ev);
+    const isAO = ev?.meta?.alwaysOn === true;
 
     return `
-      <div class="pill ${String(ev.channel || "push")} ${statusClass(ev.cardStatus)} day-pill" data-idx="${idx}">
+      <div class="pill ${String(ev.channel || "push")} ${statusClass(ev.cardStatus)} ${isAO ? "always-on" : ""} day-pill" data-idx="${idx}">
         <div class="t1">${escapeHTML(clampText(getDisplayName(ev), 90))}</div>
         <div class="t2">${escapeHTML(`${pos} (${ch}) - ${when}`)}</div>
         <div class="t3">${escapeHTML(commName)}</div>
@@ -627,7 +640,6 @@ function renderOffersLists() {
     }
   }
 
-  // ordenações base
   offers.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
   mkts.sort((a, b) => String(a.itemFullTitle).localeCompare(String(b.itemFullTitle)));
 
@@ -637,7 +649,6 @@ function renderOffersLists() {
   const mktMeta = $("mktMeta");
   if (mktMeta) mktMeta.textContent = `Total de mkt screens: ${mkts.length}`;
 
-  // render util
   const renderGroupSubtitle = (host, text) => {
     const sub = document.createElement("div");
     sub.className = "list-subtitle";
@@ -647,9 +658,14 @@ function renderOffersLists() {
 
   const renderPill = (host, ofr, borderClass) => {
     const card = document.createElement("div");
-    card.className = `pill ${borderClass}`;
 
-    // EXTERNO: somente nome completo do card
+    // ✅ FIX: mktscreen NUNCA recebe "always-on" (não marca laranja/verde)
+    const isAO =
+      ofr?.meta?.alwaysOn === true &&
+      String(ofr?.channel || "") !== "mktscreen";
+
+    card.className = `pill ${borderClass} ${isAO ? "always-on" : ""}`;
+
     const t1 = document.createElement("div");
     t1.className = "t1";
     t1.textContent = clampText(ofr.itemFullTitle || "—", 140);
@@ -664,7 +680,6 @@ function renderOffersLists() {
     host.appendChild(card);
   };
 
-  // OFFERS: agrupado (rodando vs expirado)
   const offersHost = $("offersList");
   if (offersHost) {
     offersHost.innerHTML = "";
@@ -677,7 +692,6 @@ function renderOffersLists() {
       else active.push(ofr);
     }
 
-    // ordenação útil dentro de cada grupo
     active.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
     expired.sort((a, b) => new Date(b.endAt || "1900-01-01") - new Date(a.endAt || "1900-01-01"));
 
@@ -686,7 +700,7 @@ function renderOffersLists() {
       offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
     } else {
       for (const ofr of active) {
-        renderPill(offersHost, ofr, offerBorderClass(ofr)); // verde
+        renderPill(offersHost, ofr, offerBorderClass(ofr));
       }
     }
 
@@ -695,12 +709,11 @@ function renderOffersLists() {
       offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
     } else {
       for (const ofr of expired) {
-        renderPill(offersHost, ofr, offerBorderClass(ofr)); // cinza (status-disabled)
+        renderPill(offersHost, ofr, offerBorderClass(ofr));
       }
     }
   }
 
-  // TARGET/MKTSCREEN: sem agrupamento
   const mktHost = $("mktList");
   if (mktHost) {
     mktHost.innerHTML = "";
@@ -708,7 +721,6 @@ function renderOffersLists() {
       mktHost.innerHTML = `<div class="hint">—</div>`;
     } else {
       for (const ofr of mkts) {
-        // target/mktscreen: borda neutra (se você já criou essa classe)
         const border = "status-neutral";
         renderPill(mktHost, ofr, border);
       }
@@ -716,8 +728,8 @@ function renderOffersLists() {
   }
 }
 
+
 function openOfferModal(ofr) {
-  // offers não tem "desativar jornada"
   $("btnDisableJourney")?.classList.add("hidden");
 
   currentModalEvent = ofr;
@@ -778,17 +790,55 @@ async function createFromCard() {
   const parsed = parseCardChannels(raw, name);
   const parsedOffers = parseCardOffers(raw, name);
 
-  if (parsed?.isPontual === false || parsedOffers?.isPontual === false) {
-    alert("Este card não foi adicionado: identificado como ALWAYS-ON (não pontual).");
-    return;
-  }
-
   const hasJourney = Array.isArray(parsed?.events) && parsed.events.length > 0;
   const hasOffers = Array.isArray(parsedOffers?.offers) && parsedOffers.offers.length > 0;
 
   if (!hasJourney && !hasOffers) {
     alert("Nada para adicionar: não encontrei eventos de Jornada nem Offers/MktScreen neste card.");
     return;
+  }
+
+  // Detecta se faltam datas (Journey: at vazio; Offers: startAt vazio exceto mktscreen)
+  const missingJourneyDates = hasJourney && (parsed.events || []).some(e => !String(e.at || "").trim());
+  const missingOfferDates = hasOffers && (parsedOffers.offers || []).some(o => {
+    if (o.channel === "mktscreen") return false;
+    return !String(o.startAt || "").trim();
+  });
+
+  let startISO = "";
+  if (missingJourneyDates || missingOfferDates) {
+    const startOnly = promptStartDateOnly();
+    if (!startOnly) {
+      alert("Cancelado: data de início inválida.");
+      return;
+    }
+    startISO = isoFromDateOnly(startOnly, 9, 0);
+  }
+
+  // Preenche somente o que está faltando e marca ALWAYS ON (borda laranja)
+  if (startISO && hasJourney) {
+    for (const ev of (parsed.events || [])) {
+      if (!String(ev.at || "").trim()) {
+        ev.at = startISO;
+        ev.meta = ev.meta || {};
+        ev.meta.alwaysOn = true;
+      }
+    }
+  }
+
+  if (startISO && hasOffers) {
+    for (const ofr of (parsedOffers.offers || [])) {
+      ofr.meta = ofr.meta || {};
+      if (ofr.channel === "mktscreen") {
+        // você quer borda laranja também quando pertence ao always on
+        if (missingJourneyDates || missingOfferDates) ofr.meta.alwaysOn = true;
+        continue;
+      }
+      if (!String(ofr.startAt || "").trim()) {
+        ofr.startAt = startISO;
+        ofr.meta.alwaysOn = true;
+      }
+    }
   }
 
   if (hasJourney) {
@@ -814,7 +864,7 @@ async function createFromCard() {
   const item = {
     id: uuid(),
     name,
-    fullTitle, // <-- NOVO: nome completo do card
+    fullTitle,
     cardUrl: header.cardUrl || "",
     notes: "",
     createdAt,
@@ -854,7 +904,7 @@ function sanitizeItemsForExport(items) {
   return (items || []).map(it => ({
     id: String(it.id || "").trim() || uuid(),
     name: String(it.name || "").trim() || "Item",
-    fullTitle: String(it.fullTitle || ""), // <-- NOVO
+    fullTitle: String(it.fullTitle || ""),
     cardUrl: String(it.cardUrl || ""),
     journeyDisabled: it.journeyDisabled === true,
     journeyDisabledAt: String(it.journeyDisabledAt || ""),
@@ -876,7 +926,8 @@ function sanitizeItemsForExport(items) {
         alias: String(e.alias || ""),
         meta: {
           posicaoJornada: String(e?.meta?.posicaoJornada || ""),
-          nomeComunicacao: String(e?.meta?.nomeComunicacao || "")
+          nomeComunicacao: String(e?.meta?.nomeComunicacao || ""),
+          alwaysOn: e?.meta?.alwaysOn === true
         }
       })),
     offers: (it.offers || []).map(o => ({
@@ -891,7 +942,8 @@ function sanitizeItemsForExport(items) {
         posicaoJornada: String(o?.meta?.posicaoJornada || ""),
         rawChannel: String(o?.meta?.rawChannel || ""),
         blocksCount: Number(o?.meta?.blocksCount ?? 0) || 0,
-        deeplink: String(o?.meta?.deeplink || "")
+        deeplink: String(o?.meta?.deeplink || ""),
+        alwaysOn: o?.meta?.alwaysOn === true
       }
     }))
   }));
@@ -948,7 +1000,7 @@ function isValidBackup(obj) {
 function normalizeImportedItem(raw) {
   const id = String(raw?.id || "").trim() || uuid();
   const name = String(raw?.name || "").trim() || "Item";
-  const fullTitle = String(raw?.fullTitle || "").trim(); // <-- NOVO
+  const fullTitle = String(raw?.fullTitle || "").trim();
 
   const channelCounts = raw?.channelCounts || {};
   const cc = {
@@ -971,7 +1023,8 @@ function normalizeImportedItem(raw) {
       alias: String(e.alias || ""),
       meta: {
         posicaoJornada: String(e?.meta?.posicaoJornada || ""),
-        nomeComunicacao: String(e?.meta?.nomeComunicacao || "")
+        nomeComunicacao: String(e?.meta?.nomeComunicacao || ""),
+        alwaysOn: e?.meta?.alwaysOn === true
       }
     }))
     .filter(e => ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
@@ -999,7 +1052,8 @@ function normalizeImportedItem(raw) {
       posicaoJornada: String(o?.meta?.posicaoJornada || ""),
       rawChannel: String(o?.meta?.rawChannel || ""),
       blocksCount: Number(o?.meta?.blocksCount ?? 0) || 0,
-      deeplink: String(o?.meta?.deeplink || "")
+      deeplink: String(o?.meta?.deeplink || ""),
+      alwaysOn: o?.meta?.alwaysOn === true
     }
   })).filter(o => ["banner", "inapp", "mktscreen"].includes(String(o.channel || "")));
 
@@ -1009,7 +1063,7 @@ function normalizeImportedItem(raw) {
   return {
     id,
     name,
-    fullTitle, // <-- NOVO
+    fullTitle,
     cardUrl: String(raw?.cardUrl || ""),
     notes: String(raw?.notes || ""),
     createdAt,
@@ -1066,7 +1120,7 @@ async function importBackupFromText(jsonText) {
     const merged = {
       ...cur,
       name: it.name || cur.name,
-      fullTitle: it.fullTitle || cur.fullTitle, // <-- NOVO
+      fullTitle: it.fullTitle || cur.fullTitle,
       cardUrl: it.cardUrl || cur.cardUrl,
       journeyDisabled: it.journeyDisabled === true,
       journeyDisabledAt: it.journeyDisabledAt || cur.journeyDisabledAt,

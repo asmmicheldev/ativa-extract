@@ -1,8 +1,11 @@
-// js/parsers.js (COMPLETO)
+// js/parsers.js (COMPLETO - REGRAS NOVAS)
 import { parseAnyISOish, stableHash } from "./utils.js";
 
 const ALLOWED_JOURNEY_CHANNELS = new Set(["push", "email", "whatsapp", "sms"]);
 const ALLOWED_OFFER_CHANNELS = new Set(["inapp", "banner", "mktscreen"]);
+
+// 6 meses "operacional" (não calendário exato). Se quiser mudar p/ 182/184 depois, é aqui.
+const LONG_RUNNING_DAYS_THRESHOLD = 183;
 
 function normalizeChannel(raw) {
   const s = String(raw || "").toLowerCase().trim();
@@ -20,11 +23,25 @@ function normalizeChannel(raw) {
   return "outro";
 }
 
-function detectPontual(rawText) {
-  const t = String(rawText || "").toLowerCase();
-  if (t.includes("always-on") || t.includes("always on") || t.includes("alwayson") || t.includes("always_on")) return false;
-  if (t.includes("pontual") || t.includes("pontuai")) return true;
-  return true;
+function toISOOrEmpty(raw) {
+  const dt = parseAnyISOish(String(raw || "").trim());
+  return dt ? dt.toISOString() : "";
+}
+
+function diffDays(startISO, endISO) {
+  if (!startISO || !endISO) return null;
+  const a = new Date(startISO).getTime();
+  const b = new Date(endISO).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const ms = b - a;
+  if (ms < 0) return null;
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
+
+function isLongRunningOffer(startISO, endISO) {
+  const d = diffDays(startISO, endISO);
+  if (d === null) return false;
+  return d >= LONG_RUNNING_DAYS_THRESHOLD;
 }
 
 /**
@@ -52,17 +69,10 @@ export function parseCardHeader(rawText) {
 
 /**
  * Parser Journey (calendário)
+ * Regra 1: não descarta se faltar dataInicio (fica editável).
+ * Observação: regra de ">= 6 meses" NÃO se aplica a Journey, só Offers (como você pediu).
  */
 export function parseCardChannels(rawText, itemNameForLabels = "") {
-  const isPontual = detectPontual(rawText);
-  if (!isPontual) {
-    return {
-      isPontual: false,
-      events: [],
-      channelCounts: { push: 0, email: 0, whatsapp: 0, sms: 0 }
-    };
-  }
-
   const lines = String(rawText || "")
     .split(/\r?\n/)
     .map(l => l.replace(/\t/g, " ").trim());
@@ -96,7 +106,7 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       }
 
       section = ch;
-      current = { channel: ch, posicaoJornada: "", dataInicio: null, nomeComunicacao: "" };
+      current = { channel: ch, posicaoJornada: "", dataInicio: "", nomeComunicacao: "" };
       continue;
     }
 
@@ -105,11 +115,7 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       if (pj) { current.posicaoJornada = pj[1].trim(); continue; }
 
       const di = line.match(/^dataInicio:\s*(.+)$/i);
-      if (di) {
-        const dt = parseAnyISOish(di[1].trim());
-        if (dt) current.dataInicio = dt.toISOString();
-        continue;
-      }
+      if (di) { current.dataInicio = toISOOrEmpty(di[1]); continue; }
 
       const nn = line.match(/^Nome Comunicação:\s*(.+)$/i);
       if (nn) { current.nomeComunicacao = nn[1].trim(); continue; }
@@ -125,15 +131,18 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
 
   for (const c of comms) {
     counts[c.channel] = (counts[c.channel] || 0) + 1;
-    if (!c.dataInicio) continue;
 
     const pos = c.posicaoJornada || "";
     const nome = c.nomeComunicacao || "";
+
     const label = nome
       ? `${c.channel.toUpperCase()} ${pos} — ${nome}`.trim()
       : `${c.channel.toUpperCase()} ${pos}`.trim();
 
-    const evIdSeed = `${itemNameForLabels}|journey|${c.channel}|touch|${c.dataInicio}|${label}|${nome}`;
+    // Regra 1: pode ficar vazio (editável no UI)
+    const at = c.dataInicio || "";
+
+    const evIdSeed = `${itemNameForLabels}|journey|${c.channel}|touch|${at || "NO_DATE"}|${label}|${nome}`;
     const id = "ev_" + stableHash(evIdSeed);
 
     events.push({
@@ -141,30 +150,34 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       space: "journey",
       channel: c.channel,
       kind: "touch",
-      at: c.dataInicio,
+      at,
       label,
       meta: {
         posicaoJornada: pos,
-        nomeComunicacao: nome
+        nomeComunicacao: nome,
+        // Sem "alwaysOn" aqui por regra. (Se um dia quiser, a gente cria regra separada p/ Journey.)
+        alwaysOn: false
       },
       alias: ""
     });
   }
 
-  events.sort((a, b) => new Date(a.at) - new Date(b.at));
+  events.sort((a, b) => {
+    const da = a.at ? new Date(a.at).getTime() : Infinity;
+    const db = b.at ? new Date(b.at).getTime() : Infinity;
+    return da - db;
+  });
+
+  // "isPontual" aqui fica neutro, porque o que manda pro laranja agora é meta.alwaysOn por item.
   return { isPontual: true, events, channelCounts: counts };
 }
 
 /**
  * Parser OFFERS (InApp/Banner/MktScreen)
- * - Agora pega posicao P0/P4 do CABEÇALHO: "COMUNICAÇÃO X - P0 (BANNER)"
- * - Também aceita posicaoJornada: dentro do bloco (fallback)
- * - MktScreen: pega Blocos + Deeplink, e ignora posição na UI (mas guarda se vier)
+ * Regra 1: se faltar start/end -> entra e fica editável; NÃO vira laranja só por isso.
+ * Regra 2: se tiver start+end e duração >= 6 meses -> marca alwaysOn=true (laranja).
  */
 export function parseCardOffers(rawText, itemNameForLabels = "") {
-  const isPontual = detectPontual(rawText);
-  if (!isPontual) return { isPontual: false, offers: [] };
-
   const lines = String(rawText || "")
     .split(/\r?\n/)
     .map(l => l.replace(/\t/g, " ").trim());
@@ -173,11 +186,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
   let current = null;
 
   const offersRaw = [];
-
-  const parseISO = (v) => {
-    const dt = parseAnyISOish(String(v || "").trim());
-    return dt ? dt.toISOString() : "";
-  };
 
   const commit = () => {
     if (!current) return;
@@ -189,9 +197,8 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     const line = lines[i];
     if (!line) continue;
 
-    // pega cabeçalho com posição e canal:
-    // "---------- COMUNICAÇÃO 6 - P0 (BANNER) ----------"
-    const comm2 = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+\s*-\s*(P\d+)\s*\(([^)]+)\)/i);
+    // "---------- COMUNICAÇÃO 1 - P0 (BANNER) ----------"
+    const comm2 = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+\s*-\s*(P\d+|NA)\s*\(([^)]+)\)/i);
     if (comm2) {
       commit();
 
@@ -209,7 +216,7 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
       current = {
         channel: ch,
         rawChannel,
-        posicaoJornada: posFromHeader || "",
+        posicaoJornada: posFromHeader && posFromHeader.toUpperCase() !== "NA" ? posFromHeader : "",
         startAt: "",
         endAt: "",
         name: "",
@@ -219,7 +226,7 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
       continue;
     }
 
-    // fallback: cabeçalho antigo sem posição explícita
+    // fallback: cabeçalho sem posição explícita
     const comm = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+.*\(([^)]+)\)/i);
     if (comm) {
       commit();
@@ -233,7 +240,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
         continue;
       }
 
-      // tenta inferir P? do texto do header se existir
       const posGuess = (line.match(/\b(P\d+)\b/i)?.[1] || "").toUpperCase();
 
       section = ch;
@@ -253,14 +259,13 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     if (current && section && ALLOWED_OFFER_CHANNELS.has(section)) {
       const pj = line.match(/^posicaoJornada:\s*(.+)$/i);
       if (pj) {
-        // só sobrescreve se vier algo útil
         const v = pj[1].trim();
         if (v && v.toUpperCase() !== "NA") current.posicaoJornada = v;
         continue;
       }
 
       const di = line.match(/^dataInicio:\s*(.+)$/i);
-      if (di) { current.startAt = parseISO(di[1]); continue; }
+      if (di) { current.startAt = toISOOrEmpty(di[1]); continue; }
 
       const df =
         line.match(/^dataFim:\s*(.+)$/i) ||
@@ -268,8 +273,7 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
         line.match(/^dataEncerramento:\s*(.+)$/i) ||
         line.match(/^dataTermino:\s*(.+)$/i) ||
         line.match(/^dataT[eé]rmino:\s*(.+)$/i);
-
-      if (df) { current.endAt = parseISO(df[1]); continue; }
+      if (df) { current.endAt = toISOOrEmpty(df[1]); continue; }
 
       const ne = line.match(/^Nome Experiência:\s*(.+)$/i);
       if (ne) { current.name = ne[1].trim(); continue; }
@@ -301,25 +305,37 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     const name = (o.name || "").trim();
     const labelBase = name ? name : `${String(o.channel || "").toUpperCase()}`;
 
-    const idSeed = `${itemNameForLabels}|offers|${o.channel}|${o.posicaoJornada || ""}|${o.startAt || ""}|${o.endAt || ""}|${labelBase}|${o.deeplink || ""}|${o.blocksCount || 0}`;
+    const startAt = o.startAt || "";
+    const endAt = o.endAt || "";
+
+    // Regra 2: laranja só se tiver start+end e durar >= 6 meses
+    const alwaysOn = Boolean(startAt && endAt && isLongRunningOffer(startAt, endAt));
+    const runningDays = diffDays(startAt, endAt);
+
+    const idSeed = `${itemNameForLabels}|offers|${o.channel}|${o.posicaoJornada || ""}|${startAt || ""}|${endAt || ""}|${labelBase}|${o.deeplink || ""}|${o.blocksCount || 0}`;
     const id = "of_" + stableHash(idSeed);
 
     return {
       id,
       space: "offers",
       channel: o.channel, // inapp|banner|mktscreen
-      startAt: o.startAt || "",
-      endAt: o.endAt || "",
-      name: name,
+      // Regra 1: pode ficar vazio (editável no UI)
+      startAt,
+      endAt,
+      name,
       label: labelBase,
       meta: {
         posicaoJornada: (o.posicaoJornada || "").trim(),
         rawChannel: o.rawChannel || "",
         blocksCount: Number(o.blocksCount ?? 0) || 0,
-        deeplink: o.deeplink || ""
+        deeplink: o.deeplink || "",
+        alwaysOn,
+        runningDays: Number.isFinite(runningDays) ? runningDays : null
       }
     };
   });
 
-  return { isPontual: true, offers };
+  // isPontual agora é derivado: se existir algum offer long-running, o card "não é pontual" pro contexto de monitoramento
+  const hasLongRunning = offers.some(o => o?.meta?.alwaysOn);
+  return { isPontual: !hasLongRunning, offers };
 }

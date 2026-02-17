@@ -248,6 +248,12 @@ body{
   opacity:.92;
 }
 
+/* ALWAYS-ON visual (NOVO) */
+.pill.always-on{
+  border-color: rgba(249,115,22,.85) !important;
+  box-shadow: 0 0 0 1px rgba(249,115,22,.14) inset;
+}
+
 .more{
   font-size:11px;
   color:var(--muted);
