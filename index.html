@@ -1,3 +1,4 @@
+<!-- index.html (COMPLETO ALTERADO) -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -10,10 +11,16 @@
   <header class="topbar">
     <div class="brand">
       <div class="brand-title">Ativas Extract</div>
-      <div class="brand-sub">Calendário (grid) a partir do texto do card</div>
     </div>
 
     <div class="topbar-actions">
+      <div class="tools">
+        <button id="btnWipeAll" class="btn btn-danger" type="button">Apagar tudo (local)</button>
+        <button id="btnExport" class="btn btn-secondary" type="button">Exportar</button>
+        <button id="btnImport" class="btn btn-secondary" type="button">Importar</button>
+        <input id="fileImport" type="file" accept="application/json" class="hidden" />
+      </div>
+
       <div class="month-nav">
         <button id="btnPrev" class="btn btn-secondary" type="button">←</button>
         <button id="btnToday" class="btn" type="button">Hoje</button>
@@ -25,67 +32,16 @@
   </header>
 
   <main class="layout">
-    <aside class="sidebar">
-      <div class="panel">
-        <div class="panel-title">Criar (colar card)</div>
-
-        <label class="label">Texto do card</label>
-        <textarea id="inputCard" class="textarea" placeholder="Cole aqui o texto do card da XP..."></textarea>
-
-        <div class="row">
-          <button id="btnParseCreate" class="btn btn-primary" type="button">Adicionar no calendário</button>
-          <button id="btnClearInput" class="btn btn-secondary" type="button">Limpar</button>
-        </div>
-
-        <div class="hint">
-          Regra (ATUAL): só entram no calendário eventos de canais disparados por Jornada (Push/Email/WhatsApp/SMS) e somente de cards Pontuais.
-          Banners e InApp (Offers) ficam listados abaixo (local). Marketing Screen fica em lista separada (Target).
-        </div>
+    <!-- CARD BAR (entre header e calendário) -->
+    <section class="cardbar panel">
+      <div class="cardbar-row">
+        <textarea id="inputCard" class="textarea cardbar-textarea" placeholder="Cole aqui o texto do card da XP..."></textarea>
+        <button id="btnParseCreate" class="btn btn-secondary" type="button">Adicionar no calendário</button>
       </div>
-
-      <div class="panel">
-        <div class="panel-title">Filtros</div>
-
-        <div class="row">
-          <div class="col">
-            <label class="label">Espaço</label>
-            <select id="filterSpace" class="select">
-              <option value="all">Todos</option>
-              <option value="journey">Journey</option>
-            </select>
-          </div>
-
-          <div class="col">
-            <label class="label">Canal</label>
-            <select id="filterChannel" class="select">
-              <option value="all">Todos</option>
-              <option value="push">Push</option>
-              <option value="email">Email</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="sms">SMS</option>
-            </select>
-          </div>
-        </div>
-
-        <label class="label">Buscar</label>
-        <input id="searchBox" class="input" placeholder="Nome do card/código..." />
-
-        <div class="row">
-          <button id="btnWipeAll" class="btn btn-danger" type="button">Apagar tudo (local)</button>
-        </div>
-
-        <div class="row">
-          <button id="btnExport" class="btn btn-secondary" type="button">Exportar</button>
-          <button id="btnImport" class="btn btn-secondary" type="button">Importar</button>
-        </div>
-
-        <input id="fileImport" type="file" accept="application/json" class="hidden" />
-      </div>
-    </aside>
+    </section>
 
     <section class="content">
       <div class="calendar">
-        <!-- NOVO: título + contador do calendário -->
         <div class="panel-title">Journeys detectadas (local)</div>
         <div id="journeysMeta" class="offers-meta">Total de journeys: 0</div>
 
@@ -103,10 +59,9 @@
       </div>
 
       <div id="emptyHint" class="empty-hint hidden">
-        Nenhum evento para este mês com os filtros atuais.
+        Nenhum evento para este mês.
       </div>
 
-      <!-- OFFERS + MKTSCREEN (listas locais) -->
       <div class="offers-wrap">
         <div class="panel">
           <div class="panel-title">Offers detectadas (local)</div>

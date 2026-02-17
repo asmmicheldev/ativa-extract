@@ -1,4 +1,4 @@
-// js/app.js (COMPLETO)
+// js/app.js (COMPLETO ALTERADO - SEM FILTROS/SEARCH/LIMPAR)
 import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
 import { parseCardHeader, parseCardChannels, parseCardOffers } from "./parsers.js";
 import { uuid, nowISO, dayKeyLocal, startOfMonth, endOfMonth, addDays, clampText } from "./utils.js";
@@ -7,10 +7,7 @@ const ALLOWED_JOURNEY_CHANNELS = new Set(["push", "email", "whatsapp", "sms"]);
 
 let state = {
   items: [],
-  monthCursor: startOfMonth(new Date()),
-  filterSpace: "all",
-  filterChannel: "all",
-  search: ""
+  monthCursor: startOfMonth(new Date())
 };
 
 const $ = (id) => document.getElementById(id);
@@ -218,7 +215,6 @@ async function saveAliasIfDirty() {
   }
 }
 
-// ---------- Modal binding ----------
 function bindModalOnce() {
   if (modalBound) return;
 
@@ -343,30 +339,20 @@ function monthLabel(d) {
   return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
 
-function passesFilters(ev, itemName) {
+// sem filtros agora: só valida que é journey e canal permitido
+function passesFilters(ev) {
   if (ev.space !== "journey") return false;
   if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) return false;
-
-  if (state.filterSpace !== "all" && ev.space !== state.filterSpace) return false;
-  if (state.filterChannel !== "all" && ev.channel !== state.filterChannel) return false;
-
-  const q = state.search.trim().toLowerCase();
-  if (q) {
-    const hay = `${itemName} ${ev.label || ""} ${ev.alias || ""}`.toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
   return true;
 }
 
-// ====== NOVO: contador GLOBAL (ignora mês/filtros/search) ======
 function countJourneysGlobalAll() {
   let total = 0;
   for (const it of state.items) {
     for (const ev of (it.events || [])) {
       if (!ev) continue;
-      if (ev.space !== "journey") continue;
-      if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) continue;
-      if (!String(ev.at || "").trim()) continue; // mantém igual ao calendário: só conta journeys com data
+      if (!passesFilters(ev)) continue;
+      if (!String(ev.at || "").trim()) continue;
       total++;
     }
   }
@@ -384,8 +370,8 @@ function collectEventsForMonth() {
     const cardStatus = computeCardStatus(it);
 
     for (const ev of (it.events || [])) {
-      if (!ev?.at) continue; // <- só entra no calendário se tiver data (após preenchimento)
-      if (!passesFilters(ev, itemName)) continue;
+      if (!ev?.at) continue;
+      if (!passesFilters(ev)) continue;
 
       const dt = new Date(ev.at);
       if (isNaN(dt.getTime())) continue;
@@ -437,7 +423,6 @@ function renderCalendar() {
   const grid = $("calendarGrid");
   grid.innerHTML = "";
 
-  // meta do calendário (contador)
   const journeysMeta = $("journeysMeta");
   if (journeysMeta) journeysMeta.textContent = `Total de journeys: 0`;
 
@@ -515,14 +500,11 @@ function renderCalendar() {
     grid.appendChild(cell);
   }
 
-  // emptyHint continua baseado no que está visível no mês atual (com filtros/search)
   $("emptyHint").classList.toggle("hidden", eventsMap.size > 0);
 
-  // contador GLOBAL (ignora mês + filtros + search)
   const totalAll = countJourneysGlobalAll();
   if (journeysMeta) journeysMeta.textContent = `Total de journeys: ${totalAll}`;
 }
-
 
 // ---------- Modal content (journey) ----------
 function getChannelCountsForItem(item) {
@@ -622,23 +604,7 @@ function getOfferPos(ofr) {
   return inferPosFromText(ofr?.name || ofr?.label || "");
 }
 
-function fmtOfferLine2(ofr) {
-  const ch = String(ofr.channel || "").toUpperCase();
-
-  if (ofr.channel === "mktscreen") {
-    const blocks = Number(ofr?.meta?.blocksCount ?? 0) || 0;
-    return `${blocks || "—"} (${ch})`;
-  }
-
-  const pos = getOfferPos(ofr);
-  const ini = ofr.startAt ? fmtDateOnly(ofr.startAt) : "—";
-  const fim = ofr.endAt ? fmtDateOnly(ofr.endAt) : "—";
-  return `${pos} (${ch}) | Início: ${ini} | Fim: ${fim}`;
-}
-
 function renderOffersLists() {
-  const q = state.search.trim().toLowerCase();
-
   const offers = [];
   const mkts = [];
 
@@ -647,10 +613,6 @@ function renderOffersLists() {
     const arr = Array.isArray(it.offers) ? it.offers : [];
 
     for (const ofr of arr) {
-      const nm = (ofr?.name || ofr?.label || "").trim();
-      const hay = `${cardFull} ${nm} ${ofr.channel || ""} ${ofr?.meta?.deeplink || ""}`.toLowerCase();
-      if (q && !hay.includes(q)) continue;
-
       const enriched = {
         ...ofr,
         itemId: it.id,
@@ -680,8 +642,6 @@ function renderOffersLists() {
 
   const renderPill = (host, ofr, borderClass) => {
     const card = document.createElement("div");
-
-    // mktscreen nunca marca always-on; aqui é offers mesmo, mas mantemos seguro:
     const isAO =
       ofr?.meta?.alwaysOn === true &&
       String(ofr?.channel || "") !== "mktscreen";
@@ -702,7 +662,6 @@ function renderOffersLists() {
     host.appendChild(card);
   };
 
-  // ----- OFFERS: agora com 3 grupos (Pontuais / Always On / Expiradas) -----
   const offersHost = $("offersList");
   if (offersHost) {
     offersHost.innerHTML = "";
@@ -732,46 +691,31 @@ function renderOffersLists() {
     activeAlwaysOn.sort(byStartAsc);
     expired.sort(byEndDesc);
 
-    // 1) Verdes primeiro
     renderGroupSubtitle(offersHost, "Rodando (hoje)");
-    if (!activePontual.length) {
-      offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
-    } else {
-      for (const ofr of activePontual) renderPill(offersHost, ofr, offerBorderClass(ofr));
-    }
+    if (!activePontual.length) offersHost.insertAdjacentHTML("beforeend", `<div class="empty-hint">—</div>`);
+    else for (const ofr of activePontual) renderPill(offersHost, ofr, offerBorderClass(ofr));
 
-    // 2) Laranjas depois
     renderGroupSubtitle(offersHost, "Always On");
-    if (!activeAlwaysOn.length) {
-      offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
-    } else {
-      for (const ofr of activeAlwaysOn) renderPill(offersHost, ofr, offerBorderClass(ofr));
-    }
+    if (!activeAlwaysOn.length) offersHost.insertAdjacentHTML("beforeend", `<div class="empty-hint">—</div>`);
+    else for (const ofr of activeAlwaysOn) renderPill(offersHost, ofr, offerBorderClass(ofr));
 
-    // 3) Expiradas por último
     renderGroupSubtitle(offersHost, "Já terminou (expiradas)");
-    if (!expired.length) {
-      offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
-    } else {
-      for (const ofr of expired) renderPill(offersHost, ofr, offerBorderClass(ofr));
-    }
+    if (!expired.length) offersHost.insertAdjacentHTML("beforeend", `<div class="empty-hint">—</div>`);
+    else for (const ofr of expired) renderPill(offersHost, ofr, offerBorderClass(ofr));
   }
 
-  // ----- MKT SCREEN: neutro como já estava -----
   const mktHost = $("mktList");
   if (mktHost) {
     mktHost.innerHTML = "";
     if (!mkts.length) {
-      mktHost.innerHTML = `<div class="hint">—</div>`;
+      mktHost.innerHTML = `<div class="empty-hint">—</div>`;
     } else {
       for (const ofr of mkts) {
-        const border = "status-neutral";
-        renderPill(mktHost, ofr, border);
+        renderPill(mktHost, ofr, "status-neutral");
       }
     }
   }
 }
-
 
 function openOfferModal(ofr) {
   $("btnDisableJourney")?.classList.add("hidden");
@@ -842,7 +786,6 @@ async function createFromCard() {
     return;
   }
 
-  // Detecta se faltam datas (Journey: at vazio; Offers: startAt vazio exceto mktscreen)
   const missingJourneyDates = hasJourney && (parsed.events || []).some(e => !String(e.at || "").trim());
   const missingOfferDates = hasOffers && (parsedOffers.offers || []).some(o => {
     if (o.channel === "mktscreen") return false;
@@ -859,7 +802,6 @@ async function createFromCard() {
     startISO = isoFromDateOnly(startOnly, 9, 0);
   }
 
-  // Preenche somente o que está faltando e marca ALWAYS ON (borda laranja)
   if (startISO && hasJourney) {
     for (const ev of (parsed.events || [])) {
       if (!String(ev.at || "").trim()) {
@@ -874,7 +816,6 @@ async function createFromCard() {
     for (const ofr of (parsedOffers.offers || [])) {
       ofr.meta = ofr.meta || {};
       if (ofr.channel === "mktscreen") {
-        // você quer borda laranja também quando pertence ao always on
         if (missingJourneyDates || missingOfferDates) ofr.meta.alwaysOn = true;
         continue;
       }
@@ -1225,29 +1166,10 @@ async function importBackupFromFile(file) {
 
 // ---------- Bindings ----------
 $("btnParseCreate").addEventListener("click", createFromCard);
-$("btnClearInput").addEventListener("click", () => ($("inputCard").value = ""));
 
 $("btnPrev").addEventListener("click", () => shiftMonth(-1));
 $("btnNext").addEventListener("click", () => shiftMonth(1));
 $("btnToday").addEventListener("click", gotoToday);
-
-$("filterSpace").addEventListener("change", (e) => {
-  state.filterSpace = e.target.value;
-  renderCalendar();
-  renderOffersLists();
-});
-
-$("filterChannel").addEventListener("change", (e) => {
-  state.filterChannel = e.target.value;
-  renderCalendar();
-  renderOffersLists();
-});
-
-$("searchBox").addEventListener("input", (e) => {
-  state.search = e.target.value || "";
-  renderCalendar();
-  renderOffersLists();
-});
 
 $("btnWipeAll").addEventListener("click", async () => {
   const ok = confirm("Apagar tudo que está salvo localmente neste navegador?");

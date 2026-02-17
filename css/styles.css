@@ -1,4 +1,4 @@
-/* css/styles.css (COMPLETO) */
+/* css/styles.css (COMPLETO ALTERADO) */
 :root{
   --bg:#0b0f1a;
   --panel:#0f1626;
@@ -27,18 +27,27 @@ body{
   display:flex;
   align-items:center;
   justify-content:space-between;
+  gap:12px;
   padding:10px 14px;
   background:var(--panel);
   border-bottom:1px solid var(--border);
 }
 
 .brand-title{font-weight:700}
-.brand-sub{font-size:12px;color:var(--muted)}
 
 .topbar-actions{
   display:flex;
-  gap:14px;
+  gap:12px;
   align-items:center;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+
+.tools{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
 }
 
 .month-nav{display:flex;gap:8px;align-items:center}
@@ -50,13 +59,12 @@ body{
 }
 
 .layout{
-  display:grid;
-  grid-template-columns: 380px 1fr;
+  display:flex;
+  flex-direction:column;
   gap:14px;
   padding:14px;
 }
 
-.sidebar{display:flex;flex-direction:column;gap:14px;}
 .content{min-height: calc(100vh - 80px);}
 
 .panel{
@@ -72,14 +80,6 @@ body{
   margin-bottom:10px;
 }
 
-.label{
-  display:block;
-  font-size:12px;
-  font-weight:700;
-  color:var(--muted);
-  margin:10px 0 6px;
-}
-
 .input,.select,.textarea{
   width:100%;
   border:1px solid var(--border);
@@ -91,16 +91,9 @@ body{
 }
 
 .textarea{
-  min-height:160px;
+  min-height:110px;
   resize:vertical;
 }
-
-.row{
-  display:flex;
-  gap:10px;
-  margin-top:10px;
-}
-.col{flex:1}
 
 .btn{
   border:1px solid var(--border);
@@ -110,6 +103,7 @@ body{
   border-radius:8px;
   cursor:pointer;
   font-size:12px;
+  white-space:nowrap;
 }
 .btn:hover{filter:brightness(1.08)}
 .btn-primary{
@@ -128,20 +122,22 @@ body{
   color:#fff;
 }
 
-.hint{
-  margin-top:10px;
-  font-size:12px;
-  color:var(--muted);
-  line-height:1.35;
-}
+.hidden{display:none}
 
-.list-subtitle{
-  margin: 10px 0 6px;
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--muted);
-  letter-spacing: .02em;
-  text-transform: uppercase;
+/* CARD BAR */
+.cardbar{
+  padding:12px;
+}
+.cardbar-row{
+  display:flex;
+  gap:10px;
+  align-items:stretch;
+}
+.cardbar-textarea{
+  min-height:96px;
+}
+.cardbar-btn{
+  width:220px;
 }
 
 /* Calendar */
@@ -226,7 +222,7 @@ body{
   line-height:1.2;
 }
 
-/* status tint (all blocks per card) */
+/* status tint */
 .pill.status-active{
   border-color: rgba(22,163,74,.7);
   box-shadow: 0 0 0 1px rgba(22,163,74,.15) inset;
@@ -248,7 +244,7 @@ body{
   opacity:.92;
 }
 
-/* ALWAYS-ON visual (NOVO) */
+/* ALWAYS-ON visual */
 .pill.always-on{
   border-color: rgba(249,115,22,.85) !important;
   box-shadow: 0 0 0 1px rgba(249,115,22,.14) inset;
@@ -266,7 +262,6 @@ body{
   color:var(--muted);
   font-size:12px;
 }
-.hidden{display:none}
 
 /* Modal */
 .modal{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:9999;}
@@ -330,20 +325,17 @@ body{
 .mb-date{color:var(--muted); margin-top:6px;}
 .mb-push{margin-top:6px; font-size:12px;}
 
-/* Day modal: lista clicável */
 .day-modal-list{
   display:flex;
   flex-direction:column;
   gap:8px;
   margin-top:6px;
 }
-
 .day-pill .t2{
   font-size:11px;
   color:var(--muted);
   margin-top:2px;
 }
-
 .day-pill .t3{
   font-size:11px;
   color:#cbd5e1;
@@ -372,7 +364,60 @@ body{
   gap:10px;
 }
 
-.offer-card .t1{font-size:12px;font-weight:900;color:#e2e8f0}
-.offer-card .t2{font-size:11px;color:var(--muted);margin-top:4px}
-.offer-card .t3{font-size:11px;color:#cbd5e1;margin-top:4px;opacity:.95}
-.offer-card .t4{font-size:11px;color:#cbd5e1;margin-top:4px;opacity:.95;word-break:break-word}
+/* responsivo simples */
+@media (max-width: 980px){
+  .cardbar-row{flex-direction:column;}
+  .cardbar-btn{width:100%;}
+  .month-label{min-width:auto;}
+  .offers-wrap{grid-template-columns:1fr;}
+}
+
+/* ---------- TOP: Card (textarea + botão) menores ---------- */
+
+/* input (textarea) com a MESMA altura do botão */
+#inputCard{
+  min-height: 48px;       /* antes estava gigante */
+  max-height: 480px;      /* evita estourar demais */
+  resize: vertical;
+  font-size: 13px;
+}
+
+/* botão um pouco menor */
+#btnParseCreate{
+  height: 48px;
+  padding: 6px 24px;
+  font-size: 12px;
+}
+
+/* se o botão estiver ficando alto porque o container estica,
+   isso força ele a não acompanhar a altura do textarea */
+#btnParseCreate{
+  align-self: flex-start;
+}
+
+/* ---------- OFFERS / MKT: lista com scroll interno ---------- */
+
+/* mantém o layout geral e evita "scroll infinito" na página */
+#offersList,
+#mktList{
+  max-height: 520px;      /* ajuste aqui se quiser mais/menos */
+  overflow-y: auto;
+  padding-right: 6px;     /* respiro pro scrollbar */
+}
+
+/* opcional: scrollbar mais discreto (Chrome/Edge) */
+#offersList::-webkit-scrollbar,
+#mktList::-webkit-scrollbar{
+  width: 10px;
+}
+#offersList::-webkit-scrollbar-thumb,
+#mktList::-webkit-scrollbar-thumb{
+  background: rgba(255,255,255,.10);
+  border-radius: 999px;
+  border: 2px solid rgba(0,0,0,0);
+  background-clip: padding-box;
+}
+#offersList::-webkit-scrollbar-track,
+#mktList::-webkit-scrollbar-track{
+  background: rgba(255,255,255,.03);
+}
