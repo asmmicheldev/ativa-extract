@@ -517,7 +517,7 @@ function openEventModal(ev) {
   const item = getItemById(ev.itemId);
   const title = getDisplayName(ev);
 
-  const cardName = (ev.itemName || "—").trim();
+  const cardName = (getDisplayName(ev) || "—").trim();
   const pos = getPosFromEvent(ev);
   const when = fmtDateOnly(ev.at);
   const commName = getComunicacaoName(ev);
@@ -649,7 +649,14 @@ function renderOffersLists() {
 
     for (const ofr of arr) {
       const card = document.createElement("div");
-      card.className = `pill ${offerBorderClass(ofr)}`;
+
+      // TARGET (mktscreen) = sempre borda neutra
+      // OFFERS (banner/inapp) = verde quando ativo, cinza quando expirado
+      const border = (String(ofr?.channel || "") === "mktscreen")
+        ? "status-neutral"
+        : offerBorderClass(ofr);
+
+      card.className = `pill ${border}`;
 
       // EXTERNO: somente nome completo do card
       const t1 = document.createElement("div");
