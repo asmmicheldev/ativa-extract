@@ -118,13 +118,12 @@ function isOfferExpired(ofr) {
   const endDt = new Date(end);
   if (isNaN(endDt.getTime())) return false;
 
-  // compara com "hoje 00:00 local" (se end < hoje, expirou)
   const today0 = todayStartLocal();
   return endDt < today0;
 }
 
 function offerBorderClass(ofr) {
-  // regra pedida: offers expirados => cinza (mesmo do disabled)
+  // offers expirados => cinza (mesmo do disabled)
   return isOfferExpired(ofr) ? "status-disabled" : "status-active";
 }
 
@@ -628,6 +627,7 @@ function renderOffersLists() {
     }
   }
 
+  // ordenações base
   offers.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
   mkts.sort((a, b) => String(a.itemFullTitle).localeCompare(String(b.itemFullTitle)));
 
@@ -637,45 +637,83 @@ function renderOffersLists() {
   const mktMeta = $("mktMeta");
   if (mktMeta) mktMeta.textContent = `Total de mkt screens: ${mkts.length}`;
 
-  const renderBox = (hostId, arr) => {
-    const host = $(hostId);
-    if (!host) return;
-
-    host.innerHTML = "";
-    if (!arr.length) {
-      host.innerHTML = `<div class="hint">—</div>`;
-      return;
-    }
-
-    for (const ofr of arr) {
-      const card = document.createElement("div");
-
-      // TARGET (mktscreen) = sempre borda neutra
-      // OFFERS (banner/inapp) = verde quando ativo, cinza quando expirado
-      const border = (String(ofr?.channel || "") === "mktscreen")
-        ? "status-neutral"
-        : offerBorderClass(ofr);
-
-      card.className = `pill ${border}`;
-
-      // EXTERNO: somente nome completo do card
-      const t1 = document.createElement("div");
-      t1.className = "t1";
-      t1.textContent = clampText(ofr.itemFullTitle || "—", 140);
-
-      card.appendChild(t1);
-
-      card.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openOfferModal(ofr);
-      });
-
-      host.appendChild(card);
-    }
+  // render util
+  const renderGroupSubtitle = (host, text) => {
+    const sub = document.createElement("div");
+    sub.className = "list-subtitle";
+    sub.textContent = text;
+    host.appendChild(sub);
   };
 
-  renderBox("offersList", offers);
-  renderBox("mktList", mkts);
+  const renderPill = (host, ofr, borderClass) => {
+    const card = document.createElement("div");
+    card.className = `pill ${borderClass}`;
+
+    // EXTERNO: somente nome completo do card
+    const t1 = document.createElement("div");
+    t1.className = "t1";
+    t1.textContent = clampText(ofr.itemFullTitle || "—", 140);
+
+    card.appendChild(t1);
+
+    card.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openOfferModal(ofr);
+    });
+
+    host.appendChild(card);
+  };
+
+  // OFFERS: agrupado (rodando vs expirado)
+  const offersHost = $("offersList");
+  if (offersHost) {
+    offersHost.innerHTML = "";
+
+    const active = [];
+    const expired = [];
+
+    for (const ofr of offers) {
+      if (isOfferExpired(ofr)) expired.push(ofr);
+      else active.push(ofr);
+    }
+
+    // ordenação útil dentro de cada grupo
+    active.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
+    expired.sort((a, b) => new Date(b.endAt || "1900-01-01") - new Date(a.endAt || "1900-01-01"));
+
+    renderGroupSubtitle(offersHost, "Rodando (hoje)");
+    if (!active.length) {
+      offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
+    } else {
+      for (const ofr of active) {
+        renderPill(offersHost, ofr, offerBorderClass(ofr)); // verde
+      }
+    }
+
+    renderGroupSubtitle(offersHost, "Já terminou (expiradas)");
+    if (!expired.length) {
+      offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
+    } else {
+      for (const ofr of expired) {
+        renderPill(offersHost, ofr, offerBorderClass(ofr)); // cinza (status-disabled)
+      }
+    }
+  }
+
+  // TARGET/MKTSCREEN: sem agrupamento
+  const mktHost = $("mktList");
+  if (mktHost) {
+    mktHost.innerHTML = "";
+    if (!mkts.length) {
+      mktHost.innerHTML = `<div class="hint">—</div>`;
+    } else {
+      for (const ofr of mkts) {
+        // target/mktscreen: borda neutra (se você já criou essa classe)
+        const border = "status-neutral";
+        renderPill(mktHost, ofr, border);
+      }
+    }
+  }
 }
 
 function openOfferModal(ofr) {
