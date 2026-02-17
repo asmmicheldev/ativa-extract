@@ -1,10 +1,6 @@
 // js/app.js (COMPLETO)
-// Regras:
-// - Calendário = APENAS eventos disparados por JORNADAS
-// - APENAS cards PONTUAIS
-// - IGNORAR banners e InApp (Offers) por enquanto
 import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
-import { parseCardHeader, parseCardChannels } from "./parsers.js";
+import { parseCardHeader, parseCardChannels, parseCardOffers } from "./parsers.js";
 import { uuid, nowISO, dayKeyLocal, startOfMonth, endOfMonth, addDays, clampText } from "./utils.js";
 
 const ALLOWED_JOURNEY_CHANNELS = new Set(["push", "email", "whatsapp", "sms"]);
@@ -105,7 +101,7 @@ function statusClass(status) {
 
 // ---------- Modal state ----------
 let modalBound = false;
-let currentModalEvent = null;
+let currentModalEvent = null; // journey OU offer (só pra deletar card)
 let aliasDirty = false;
 let saveTimer = null;
 
@@ -141,6 +137,12 @@ async function saveAliasIfDirty() {
     return;
   }
   if (!currentModalEvent?.itemId || !currentModalEvent?.id) {
+    aliasDirty = false;
+    showSaving(false);
+    return;
+  }
+
+  if (currentModalEvent.space !== "journey") {
     aliasDirty = false;
     showSaving(false);
     return;
@@ -212,7 +214,7 @@ function bindModalOnce() {
 
   btnDelete.addEventListener("click", async () => {
     if (!currentModalEvent?.itemId) return;
-    const ok = confirm("Excluir este card inteiro (todos os eventos dele)?");
+    const ok = confirm("Excluir este card inteiro (todos os eventos e offers dele)?");
     if (!ok) return;
 
     await dbDeleteItem(currentModalEvent.itemId);
@@ -222,6 +224,7 @@ function bindModalOnce() {
 
   btnDisable.addEventListener("click", async () => {
     if (!currentModalEvent?.itemId) return;
+    if (currentModalEvent.space !== "journey") return;
 
     const ok = confirm("Confirmar: você já desativou a jornada na Adobe e quer marcar este card como 'Jornada desativada' aqui?");
     if (!ok) return;
@@ -239,6 +242,7 @@ function bindModalOnce() {
   });
 
   titleEl.addEventListener("input", () => {
+    if (currentModalEvent?.space !== "journey") return;
     aliasDirty = true;
     scheduleSave();
   });
@@ -298,11 +302,9 @@ function monthLabel(d) {
 }
 
 function passesFilters(ev, itemName) {
-  // hard rules (não negociáveis)
   if (ev.space !== "journey") return false;
   if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) return false;
 
-  // filtros do UI
   if (state.filterSpace !== "all" && ev.space !== state.filterSpace) return false;
   if (state.filterChannel !== "all" && ev.channel !== state.filterChannel) return false;
 
@@ -457,7 +459,7 @@ function renderCalendar() {
   $("emptyHint").classList.toggle("hidden", totalVisible > 0);
 }
 
-// ---------- Modal content ----------
+// ---------- Modal content (journey) ----------
 function getChannelCountsForItem(item) {
   const cc = item?.channelCounts || {};
   const pairs = [
@@ -476,6 +478,8 @@ function getChannelCountsForItem(item) {
 }
 
 function openEventModal(ev) {
+  $("btnDisableJourney")?.classList.remove("hidden");
+
   currentModalEvent = ev;
 
   const item = getItemById(ev.itemId);
@@ -509,7 +513,6 @@ function openDayModal(dayKey, entries) {
     day: "2-digit"
   });
 
-  // monta "pills" clicáveis dentro do modal
   const itemsHTML = (entries || []).map((ev, idx) => {
     const ch = String(ev.channel || "push").toUpperCase();
     const when = fmtDateOnly(ev.at);
@@ -528,7 +531,6 @@ function openDayModal(dayKey, entries) {
   currentModalEvent = null;
   openModalBase(title, `<div class="day-modal-list">${itemsHTML || "Sem eventos."}</div>`);
 
-  // bind clique nas pills do modal (abrir o evento real)
   const bodyEl = $("modalBody");
   if (!bodyEl) return;
 
@@ -542,10 +544,159 @@ function openDayModal(dayKey, entries) {
   });
 }
 
+// ---------- OFFERS lists (BANNER/INAPP) + MKTSCREEN ----------
+function inferPosFromText(s) {
+  const m = String(s || "").match(/\b(P\d+)\b/i);
+  return m ? m[1].toUpperCase() : "NA";
+}
+
+function getOfferPos(ofr) {
+  const pos = String(ofr?.meta?.posicaoJornada || "").trim();
+  if (pos) return pos.toUpperCase();
+  return inferPosFromText(ofr?.name || ofr?.label || "");
+}
+
+function fmtOfferLine2(ofr) {
+  const ch = String(ofr.channel || "").toUpperCase();
+
+  // MktScreen: NÃO tem posição e NÃO mostra "BLOCOS:"
+  if (ofr.channel === "mktscreen") {
+    const blocks = Number(ofr?.meta?.blocksCount ?? 0) || 0;
+    return `${blocks || "—"} (${ch})`;
+  }
+
+  const pos = getOfferPos(ofr);
+  const ini = ofr.startAt ? fmtDateOnly(ofr.startAt) : "—";
+  const fim = ofr.endAt ? fmtDateOnly(ofr.endAt) : "—";
+  return `${pos} (${ch}) | Início: ${ini} | Fim: ${fim}`;
+}
+
+function renderOffersLists() {
+  const q = state.search.trim().toLowerCase();
+
+  const offers = [];
+  const mkts = [];
+
+  for (const it of state.items) {
+    const cardName = (it.name || "Item").trim();
+    const arr = Array.isArray(it.offers) ? it.offers : [];
+
+    for (const ofr of arr) {
+      const nm = (ofr?.name || ofr?.label || "").trim();
+      const hay = `${cardName} ${nm} ${ofr.channel || ""} ${ofr?.meta?.deeplink || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) continue;
+
+      const enriched = {
+        ...ofr,
+        itemId: it.id,
+        itemName: cardName
+      };
+
+      if (String(ofr.channel) === "mktscreen") mkts.push(enriched);
+      else offers.push(enriched);
+    }
+  }
+
+  offers.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
+  mkts.sort((a, b) => String(a.itemName).localeCompare(String(b.itemName)));
+
+  const offersMeta = $("offersMeta");
+  if (offersMeta) offersMeta.textContent = `Total de offers: ${offers.length}`;
+
+  const mktMeta = $("mktMeta");
+  if (mktMeta) mktMeta.textContent = `Total de mkt screens: ${mkts.length}`;
+
+  const renderBox = (hostId, arr, type) => {
+    const host = $(hostId);
+    if (!host) return;
+
+    host.innerHTML = "";
+    if (!arr.length) {
+      host.innerHTML = `<div class="hint">—</div>`;
+      return;
+    }
+
+    for (const ofr of arr) {
+      const card = document.createElement("div");
+      card.className = `pill offer-card status-active`;
+
+      const t1 = document.createElement("div");
+      t1.className = "t1";
+      t1.textContent = clampText(ofr.itemName || "—", 95);
+
+      const t2 = document.createElement("div");
+      t2.className = "t2";
+      t2.textContent = clampText(fmtOfferLine2(ofr), 160);
+
+      card.appendChild(t1);
+      card.appendChild(t2);
+
+      if (type === "mktscreen") {
+        const t3 = document.createElement("div");
+        t3.className = "t4";
+        t3.textContent = (ofr?.meta?.deeplink || "—");
+        card.appendChild(t3);
+      } else {
+        const t3 = document.createElement("div");
+        t3.className = "t3";
+        t3.textContent = clampText((ofr.name || ofr.label || "—"), 140);
+        card.appendChild(t3);
+      }
+
+      card.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openOfferModal(ofr);
+      });
+
+      host.appendChild(card);
+    }
+  };
+
+  renderBox("offersList", offers, "offers");
+  renderBox("mktList", mkts, "mktscreen");
+}
+
+function openOfferModal(ofr) {
+  $("btnDisableJourney")?.classList.add("hidden");
+
+  currentModalEvent = ofr;
+
+  const cardName = (ofr.itemName || "—").trim();
+  const ch = String(ofr.channel || "").toUpperCase();
+
+  if (ofr.channel === "mktscreen") {
+    const blocks = Number(ofr?.meta?.blocksCount ?? 0) || 0;
+    const deeplink = (ofr?.meta?.deeplink || "—").trim();
+
+    const bodyHTML = `
+      <div class="mb-journey">${escapeHTML(cardName)}</div>
+      <div class="mb-date">${escapeHTML(`${blocks || "—"} (${ch})`)}</div>
+      <div class="mb-push">${escapeHTML(deeplink)}</div>
+    `;
+
+    openModalBase("MktScreen", bodyHTML);
+    return;
+  }
+
+  const pos = getOfferPos(ofr);
+  const ini = ofr.startAt ? fmtDateOnly(ofr.startAt) : "—";
+  const fim = ofr.endAt ? fmtDateOnly(ofr.endAt) : "—";
+  const nm = (ofr.name || ofr.label || "—").trim();
+
+  const bodyHTML = `
+    <div class="mb-journey">${escapeHTML(cardName)}</div>
+    <div class="mb-date">${escapeHTML(`${pos} (${ch}) | Início: ${ini} | Fim: ${fim}`)}</div>
+    <div class="mb-push">${escapeHTML(nm)}</div>
+  `;
+
+  openModalBase(nm, bodyHTML);
+}
+
 // ---------- Data / actions ----------
 async function refresh() {
   state.items = await dbGetAllItems();
   renderCalendar();
+  renderOffersLists();
 }
 
 function makeDefaultAlias(fullTitle) {
@@ -563,7 +714,6 @@ async function createFromCard() {
   const fullTitle = (header.headerLine || "").trim() || "Card";
   const name = header.displayName || header.headerLine || "Item";
 
-  // parser já filtra por: (1) pontual (2) apenas canais de jornada (3) ignora banner/inapp
   const parsed = parseCardChannels(raw, name);
 
   if (parsed?.isPontual === false) {
@@ -582,6 +732,8 @@ async function createFromCard() {
     }
   }
 
+  const parsedOffers = parseCardOffers(raw, name);
+
   const createdAt = nowISO();
   const item = {
     id: uuid(),
@@ -594,7 +746,6 @@ async function createFromCard() {
     journeyDisabled: false,
     journeyDisabledAt: "",
 
-    // SOMENTE os canais permitidos (journey)
     channelCounts: parsed.channelCounts || {
       push: (parsed.events || []).filter(e => e.channel === "push").length,
       email: (parsed.events || []).filter(e => e.channel === "email").length,
@@ -602,7 +753,8 @@ async function createFromCard() {
       sms: (parsed.events || []).filter(e => e.channel === "sms").length
     },
 
-    events: parsed.events || []
+    events: parsed.events || [],
+    offers: parsedOffers?.offers || []
   };
 
   await dbPutItem(item);
@@ -624,7 +776,7 @@ function gotoToday() {
 
 // ---------- Export / Import ----------
 const EXPORT_MAGIC = "ativas-extract";
-const EXPORT_SCHEMA = 1;
+const EXPORT_SCHEMA = 2;
 
 function sanitizeItemsForExport(items) {
   return (items || []).map(it => ({
@@ -653,7 +805,22 @@ function sanitizeItemsForExport(items) {
           posicaoJornada: String(e?.meta?.posicaoJornada || ""),
           nomeComunicacao: String(e?.meta?.nomeComunicacao || "")
         }
-      }))
+      })),
+    offers: (it.offers || []).map(o => ({
+      id: String(o.id || ""),
+      space: "offers",
+      channel: String(o.channel || ""),
+      startAt: String(o.startAt || ""),
+      endAt: String(o.endAt || ""),
+      name: String(o.name || ""),
+      label: String(o.label || ""),
+      meta: {
+        posicaoJornada: String(o?.meta?.posicaoJornada || ""),
+        rawChannel: String(o?.meta?.rawChannel || ""),
+        blocksCount: Number(o?.meta?.blocksCount ?? 0) || 0,
+        deeplink: String(o?.meta?.deeplink || "")
+      }
+    }))
   }));
 }
 
@@ -700,8 +867,8 @@ async function exportBackup() {
 function isValidBackup(obj) {
   if (!obj || typeof obj !== "object") return false;
   if (obj.magic !== EXPORT_MAGIC) return false;
-  if (obj.schema !== EXPORT_SCHEMA) return false;
   if (!Array.isArray(obj.items)) return false;
+  if (![1,2].includes(Number(obj.schema))) return false;
   return true;
 }
 
@@ -736,7 +903,6 @@ function normalizeImportedItem(raw) {
     .filter(e => ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
     .sort((a, b) => new Date(a.at) - new Date(b.at));
 
-  // recalcula counts se vier vazio
   const anyCount = Object.values(cc).some(v => Number(v) > 0);
   if (!anyCount) {
     cc.push = 0; cc.email = 0; cc.whatsapp = 0; cc.sms = 0;
@@ -745,6 +911,23 @@ function normalizeImportedItem(raw) {
       cc[k] = (cc[k] || 0) + 1;
     }
   }
+
+  const offers = Array.isArray(raw?.offers) ? raw.offers : [];
+  const normalizedOffers = offers.map(o => ({
+    id: String(o.id || "").trim() || ("of_" + uuid()),
+    space: "offers",
+    channel: String(o.channel || ""),
+    startAt: String(o.startAt || ""),
+    endAt: String(o.endAt || ""),
+    name: String(o.name || ""),
+    label: String(o.label || ""),
+    meta: {
+      posicaoJornada: String(o?.meta?.posicaoJornada || ""),
+      rawChannel: String(o?.meta?.rawChannel || ""),
+      blocksCount: Number(o?.meta?.blocksCount ?? 0) || 0,
+      deeplink: String(o?.meta?.deeplink || "")
+    }
+  })).filter(o => ["banner","inapp","mktscreen"].includes(String(o.channel || "")));
 
   const createdAt = String(raw?.createdAt || "") || nowISO();
   const updatedAt = String(raw?.updatedAt || "") || nowISO();
@@ -759,7 +942,8 @@ function normalizeImportedItem(raw) {
     journeyDisabled: raw?.journeyDisabled === true,
     journeyDisabledAt: String(raw?.journeyDisabledAt || ""),
     channelCounts: cc,
-    events: normalizedEvents
+    events: normalizedEvents,
+    offers: normalizedOffers
   };
 }
 
@@ -810,7 +994,6 @@ async function importBackupFromText(jsonText) {
       cardUrl: it.cardUrl || cur.cardUrl,
       journeyDisabled: it.journeyDisabled === true,
       journeyDisabledAt: it.journeyDisabledAt || cur.journeyDisabledAt,
-      channelCounts: it.channelCounts || cur.channelCounts,
       updatedAt: nowISO()
     };
 
@@ -819,9 +1002,8 @@ async function importBackupFromText(jsonText) {
 
     for (const e of (it.events || [])) {
       const prev = evMap.get(e.id);
-      if (!prev) {
-        evMap.set(e.id, e);
-      } else {
+      if (!prev) evMap.set(e.id, e);
+      else {
         evMap.set(e.id, {
           ...prev,
           ...e,
@@ -835,7 +1017,18 @@ async function importBackupFromText(jsonText) {
       .filter(e => e && e.at && ALLOWED_JOURNEY_CHANNELS.has(String(e.channel || "")))
       .sort((a, b) => new Date(a.at) - new Date(b.at));
 
-    // counts (recalcula)
+    const curOffers = Array.isArray(cur.offers) ? cur.offers : [];
+    const ofMap = new Map(curOffers.map(o => [o.id, o]));
+
+    for (const o of (it.offers || [])) {
+      const prev = ofMap.get(o.id);
+      if (!prev) ofMap.set(o.id, o);
+      else ofMap.set(o.id, { ...prev, ...o, meta: { ...(prev.meta || {}), ...(o.meta || {}) } });
+    }
+
+    merged.offers = Array.from(ofMap.values())
+      .filter(o => o && ["banner","inapp","mktscreen"].includes(String(o.channel || "")));
+
     const counts = { push:0,email:0,whatsapp:0,sms:0 };
     for (const e of (merged.events || [])) {
       const k = String(e.channel || "push");
@@ -867,16 +1060,19 @@ $("btnToday").addEventListener("click", gotoToday);
 $("filterSpace").addEventListener("change", (e) => {
   state.filterSpace = e.target.value;
   renderCalendar();
+  renderOffersLists();
 });
 
 $("filterChannel").addEventListener("change", (e) => {
   state.filterChannel = e.target.value;
   renderCalendar();
+  renderOffersLists();
 });
 
 $("searchBox").addEventListener("input", (e) => {
   state.search = e.target.value || "";
   renderCalendar();
+  renderOffersLists();
 });
 
 $("btnWipeAll").addEventListener("click", async () => {

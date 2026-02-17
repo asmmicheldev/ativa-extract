@@ -1,11 +1,8 @@
 // js/parsers.js (COMPLETO)
-// Regras deste parser (fase calendário):
-// - Só extrai COMUNICAÇÃO ... que sejam CANAIS DE JORNADA (Push/Email/WhatsApp/SMS)
-// - Ignora Banner e InApp por enquanto (Offers)
-// - Só retorna eventos se o card for PONTUAL (se detectar Always-On, bloqueia)
 import { parseAnyISOish, stableHash } from "./utils.js";
 
 const ALLOWED_JOURNEY_CHANNELS = new Set(["push", "email", "whatsapp", "sms"]);
+const ALLOWED_OFFER_CHANNELS = new Set(["inapp", "banner", "mktscreen"]);
 
 function normalizeChannel(raw) {
   const s = String(raw || "").toLowerCase().trim();
@@ -15,24 +12,18 @@ function normalizeChannel(raw) {
   if (s.includes("whatsapp") || s.includes("wpp") || s.includes("zap")) return "whatsapp";
   if (s.includes("sms")) return "sms";
 
-  // ignorados por enquanto (offers)
   if (s.includes("inapp") || s.includes("in-app") || s.includes("in app")) return "inapp";
   if (s.includes("banner")) return "banner";
-  if (s.includes("mktscreen") || s.includes("marketing screen") || s.includes("mkt screen") || s.includes("mkt")) return "mktscreen";
+  if (s.includes("mktscreen") || s.includes("marketing screen") || s.includes("mkt screen")) return "mktscreen";
+  if (/\bmkt\b/.test(s)) return "mktscreen";
 
   return "outro";
 }
 
 function detectPontual(rawText) {
   const t = String(rawText || "").toLowerCase();
-
-  // sinais fortes de always-on
   if (t.includes("always-on") || t.includes("always on") || t.includes("alwayson") || t.includes("always_on")) return false;
-
-  // sinais de pontual (se tiver, ótimo)
   if (t.includes("pontual") || t.includes("pontuai")) return true;
-
-  // fallback: se não detectou always-on, assume pontual (pra não te travar)
   return true;
 }
 
@@ -60,9 +51,7 @@ export function parseCardHeader(rawText) {
 }
 
 /**
- * Parser mix (fase calendário):
- * - extrai comunicações por canal (Jornada) e transforma em events
- * - retorna isPontual e channelCounts (somente canais permitidos)
+ * Parser Journey (calendário)
  */
 export function parseCardChannels(rawText, itemNameForLabels = "") {
   const isPontual = detectPontual(rawText);
@@ -78,14 +67,13 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
     .split(/\r?\n/)
     .map(l => l.replace(/\t/g, " ").trim());
 
-  let section = null; // "push"|"email"|"whatsapp"|"sms"|...|null
+  let section = null;
   let current = null;
 
-  const comms = []; // { channel, posicaoJornada, dataInicio, nomeComunicacao }
+  const comms = [];
 
   const commitCurrent = () => {
     if (!current) return;
-    // só comita se for canal permitido
     if (ALLOWED_JOURNEY_CHANNELS.has(String(current.channel || ""))) comms.push(current);
     current = null;
   };
@@ -101,7 +89,6 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       const chRaw = comm[1] || "";
       const ch = normalizeChannel(chRaw);
 
-      // se for banner/inapp/etc, ignora (apenas não cria "current")
       if (!ALLOWED_JOURNEY_CHANNELS.has(ch)) {
         section = null;
         current = null;
@@ -138,13 +125,13 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
 
   for (const c of comms) {
     counts[c.channel] = (counts[c.channel] || 0) + 1;
-
-    // AON sem data -> não entra no calendário
     if (!c.dataInicio) continue;
 
     const pos = c.posicaoJornada || "";
     const nome = c.nomeComunicacao || "";
-    const label = nome ? `${c.channel.toUpperCase()} ${pos} — ${nome}`.trim() : `${c.channel.toUpperCase()} ${pos}`.trim();
+    const label = nome
+      ? `${c.channel.toUpperCase()} ${pos} — ${nome}`.trim()
+      : `${c.channel.toUpperCase()} ${pos}`.trim();
 
     const evIdSeed = `${itemNameForLabels}|journey|${c.channel}|touch|${c.dataInicio}|${label}|${nome}`;
     const id = "ev_" + stableHash(evIdSeed);
@@ -165,6 +152,174 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
   }
 
   events.sort((a, b) => new Date(a.at) - new Date(b.at));
-
   return { isPontual: true, events, channelCounts: counts };
+}
+
+/**
+ * Parser OFFERS (InApp/Banner/MktScreen)
+ * - Agora pega posicao P0/P4 do CABEÇALHO: "COMUNICAÇÃO X - P0 (BANNER)"
+ * - Também aceita posicaoJornada: dentro do bloco (fallback)
+ * - MktScreen: pega Blocos + Deeplink, e ignora posição na UI (mas guarda se vier)
+ */
+export function parseCardOffers(rawText, itemNameForLabels = "") {
+  const isPontual = detectPontual(rawText);
+  if (!isPontual) return { isPontual: false, offers: [] };
+
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map(l => l.replace(/\t/g, " ").trim());
+
+  let section = null;
+  let current = null;
+
+  const offersRaw = [];
+
+  const parseISO = (v) => {
+    const dt = parseAnyISOish(String(v || "").trim());
+    return dt ? dt.toISOString() : "";
+  };
+
+  const commit = () => {
+    if (!current) return;
+    if (ALLOWED_OFFER_CHANNELS.has(String(current.channel || ""))) offersRaw.push(current);
+    current = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+
+    // pega cabeçalho com posição e canal:
+    // "---------- COMUNICAÇÃO 6 - P0 (BANNER) ----------"
+    const comm2 = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+\s*-\s*(P\d+)\s*\(([^)]+)\)/i);
+    if (comm2) {
+      commit();
+
+      const posFromHeader = (comm2[1] || "").trim();
+      const rawChannel = (comm2[2] || "").trim();
+      const ch = normalizeChannel(rawChannel);
+
+      if (!ALLOWED_OFFER_CHANNELS.has(ch)) {
+        section = null;
+        current = null;
+        continue;
+      }
+
+      section = ch;
+      current = {
+        channel: ch,
+        rawChannel,
+        posicaoJornada: posFromHeader || "",
+        startAt: "",
+        endAt: "",
+        name: "",
+        blocksCount: 0,
+        deeplink: ""
+      };
+      continue;
+    }
+
+    // fallback: cabeçalho antigo sem posição explícita
+    const comm = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+.*\(([^)]+)\)/i);
+    if (comm) {
+      commit();
+
+      const rawChannel = (comm[1] || "").trim();
+      const ch = normalizeChannel(rawChannel);
+
+      if (!ALLOWED_OFFER_CHANNELS.has(ch)) {
+        section = null;
+        current = null;
+        continue;
+      }
+
+      // tenta inferir P? do texto do header se existir
+      const posGuess = (line.match(/\b(P\d+)\b/i)?.[1] || "").toUpperCase();
+
+      section = ch;
+      current = {
+        channel: ch,
+        rawChannel,
+        posicaoJornada: posGuess || "",
+        startAt: "",
+        endAt: "",
+        name: "",
+        blocksCount: 0,
+        deeplink: ""
+      };
+      continue;
+    }
+
+    if (current && section && ALLOWED_OFFER_CHANNELS.has(section)) {
+      const pj = line.match(/^posicaoJornada:\s*(.+)$/i);
+      if (pj) {
+        // só sobrescreve se vier algo útil
+        const v = pj[1].trim();
+        if (v && v.toUpperCase() !== "NA") current.posicaoJornada = v;
+        continue;
+      }
+
+      const di = line.match(/^dataInicio:\s*(.+)$/i);
+      if (di) { current.startAt = parseISO(di[1]); continue; }
+
+      const df =
+        line.match(/^dataFim:\s*(.+)$/i) ||
+        line.match(/^dataFinal:\s*(.+)$/i) ||
+        line.match(/^dataEncerramento:\s*(.+)$/i) ||
+        line.match(/^dataTermino:\s*(.+)$/i) ||
+        line.match(/^dataT[eé]rmino:\s*(.+)$/i);
+
+      if (df) { current.endAt = parseISO(df[1]); continue; }
+
+      const ne = line.match(/^Nome Experiência:\s*(.+)$/i);
+      if (ne) { current.name = ne[1].trim(); continue; }
+
+      const nc = line.match(/^Nome Campanha:\s*(.+)$/i);
+      if (nc && !current.name) { current.name = nc[1].trim(); continue; }
+
+      const ncom = line.match(/^Nome Comunicação:\s*(.+)$/i);
+      if (ncom && !current.name) { current.name = ncom[1].trim(); continue; }
+
+      if (section === "mktscreen") {
+        const bl = line.match(/^Blocos:\s*(\d+)/i);
+        if (bl) { current.blocksCount = Number(bl[1]) || 0; continue; }
+
+        const url = line.match(/^URL:\s*(appxpinvestimentos:\/\/\S+)/i);
+        if (url) { current.deeplink = url[1].trim(); continue; }
+
+        const url2 = line.match(/^MktScreen\s*URL:\s*(appxpinvestimentos:\/\/\S+)/i);
+        if (url2) { current.deeplink = url2[1].trim(); continue; }
+      }
+
+      continue;
+    }
+  }
+
+  commit();
+
+  const offers = offersRaw.map((o) => {
+    const name = (o.name || "").trim();
+    const labelBase = name ? name : `${String(o.channel || "").toUpperCase()}`;
+
+    const idSeed = `${itemNameForLabels}|offers|${o.channel}|${o.posicaoJornada || ""}|${o.startAt || ""}|${o.endAt || ""}|${labelBase}|${o.deeplink || ""}|${o.blocksCount || 0}`;
+    const id = "of_" + stableHash(idSeed);
+
+    return {
+      id,
+      space: "offers",
+      channel: o.channel, // inapp|banner|mktscreen
+      startAt: o.startAt || "",
+      endAt: o.endAt || "",
+      name: name,
+      label: labelBase,
+      meta: {
+        posicaoJornada: (o.posicaoJornada || "").trim(),
+        rawChannel: o.rawChannel || "",
+        blocksCount: Number(o.blocksCount ?? 0) || 0,
+        deeplink: o.deeplink || ""
+      }
+    };
+  });
+
+  return { isPontual: true, offers };
 }

@@ -68,7 +68,7 @@ export function addDays(d, n) {
   return dt;
 }
 
-// hash simples e estável (FNV-1a 32-bit) para id de evento
+// hash simples e estável (FNV-1a 32-bit) para id de evento/offer
 export function stableHash(str) {
   let h = 0x811c9dc5;
   const s = String(str ?? "");

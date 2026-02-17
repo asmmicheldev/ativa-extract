@@ -40,7 +40,7 @@
 
         <div class="hint">
           Regra (ATUAL): só entram no calendário eventos de canais disparados por Jornada (Push/Email/WhatsApp/SMS) e somente de cards Pontuais.
-          Banners e InApp (Offers) são ignorados por enquanto.
+          Banners e InApp (Offers) ficam listados abaixo (local). Marketing Screen fica em lista separada (Target).
         </div>
       </div>
 
@@ -101,6 +101,21 @@
 
       <div id="emptyHint" class="empty-hint hidden">
         Nenhum evento para este mês com os filtros atuais.
+      </div>
+
+      <!-- OFFERS + MKTSCREEN (listas locais) -->
+      <div class="offers-wrap">
+        <div class="panel">
+          <div class="panel-title">Offers detectadas (local)</div>
+          <div id="offersMeta" class="offers-meta">Total de offers: 0</div>
+          <div id="offersList" class="offers-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Marketing Screens (Target) detectadas (local)</div>
+          <div id="mktMeta" class="offers-meta">Total de mkt screens: 0</div>
+          <div id="mktList" class="offers-list"></div>
+        </div>
       </div>
     </section>
   </main>

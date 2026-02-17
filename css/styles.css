@@ -308,7 +308,6 @@ body{
 .mb-date{color:var(--muted); margin-top:6px;}
 .mb-push{margin-top:6px; font-size:12px;}
 
-
 /* Day modal: lista clicável */
 .day-modal-list{
   display:flex;
@@ -329,3 +328,29 @@ body{
   margin-top:2px;
   opacity:.95;
 }
+
+/* OFFERS area */
+.offers-wrap{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:14px;
+  margin-top:14px;
+}
+
+.offers-meta{
+  font-size:12px;
+  color:var(--muted);
+  margin-top:-4px;
+  margin-bottom:10px;
+}
+
+.offers-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.offer-card .t1{font-size:12px;font-weight:900;color:#e2e8f0}
+.offer-card .t2{font-size:11px;color:var(--muted);margin-top:4px}
+.offer-card .t3{font-size:11px;color:#cbd5e1;margin-top:4px;opacity:.95}
+.offer-card .t4{font-size:11px;color:#cbd5e1;margin-top:4px;opacity:.95;word-break:break-word}
