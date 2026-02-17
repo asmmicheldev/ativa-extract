@@ -307,3 +307,25 @@ body{
 .mb-journey{font-weight:800; font-size:13px; margin-top:6px;}
 .mb-date{color:var(--muted); margin-top:6px;}
 .mb-push{margin-top:6px; font-size:12px;}
+
+
+/* Day modal: lista clicável */
+.day-modal-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:6px;
+}
+
+.day-pill .t2{
+  font-size:11px;
+  color:var(--muted);
+  margin-top:2px;
+}
+
+.day-pill .t3{
+  font-size:11px;
+  color:#cbd5e1;
+  margin-top:2px;
+  opacity:.95;
+}

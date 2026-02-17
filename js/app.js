@@ -502,11 +502,44 @@ function openEventModal(ev) {
 
 function openDayModal(dayKey, entries) {
   const d = new Date(dayKey + "T00:00:00");
-  const title = d.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "2-digit" });
+  const title = d.toLocaleDateString("pt-BR", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "2-digit"
+  });
 
-  const lines = entries.map(ev => `• ${escapeHTML(getDisplayName(ev))}`).join("<br/>");
+  // monta "pills" clicáveis dentro do modal
+  const itemsHTML = (entries || []).map((ev, idx) => {
+    const ch = String(ev.channel || "push").toUpperCase();
+    const when = fmtDateOnly(ev.at);
+    const pos = getPosFromEvent(ev);
+    const commName = getComunicacaoName(ev);
+
+    return `
+      <div class="pill ${String(ev.channel || "push")} ${statusClass(ev.cardStatus)} day-pill" data-idx="${idx}">
+        <div class="t1">${escapeHTML(clampText(getDisplayName(ev), 90))}</div>
+        <div class="t2">${escapeHTML(`${pos} (${ch}) - ${when}`)}</div>
+        <div class="t3">${escapeHTML(commName)}</div>
+      </div>
+    `;
+  }).join("");
+
   currentModalEvent = null;
-  openModalBase(title, lines || "Sem eventos.");
+  openModalBase(title, `<div class="day-modal-list">${itemsHTML || "Sem eventos."}</div>`);
+
+  // bind clique nas pills do modal (abrir o evento real)
+  const bodyEl = $("modalBody");
+  if (!bodyEl) return;
+
+  bodyEl.querySelectorAll(".day-pill").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = Number(el.dataset.idx);
+      const ev = entries?.[idx];
+      if (ev) openEventModal(ev);
+    });
+  });
 }
 
 // ---------- Data / actions ----------
