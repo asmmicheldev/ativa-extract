@@ -358,6 +358,21 @@ function passesFilters(ev, itemName) {
   return true;
 }
 
+// ====== NOVO: contador GLOBAL (ignora mês/filtros/search) ======
+function countJourneysGlobalAll() {
+  let total = 0;
+  for (const it of state.items) {
+    for (const ev of (it.events || [])) {
+      if (!ev) continue;
+      if (ev.space !== "journey") continue;
+      if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) continue;
+      if (!String(ev.at || "").trim()) continue; // mantém igual ao calendário: só conta journeys com data
+      total++;
+    }
+  }
+  return total;
+}
+
 function collectEventsForMonth() {
   const start = startOfMonth(state.monthCursor);
   const end = endOfMonth(state.monthCursor);
@@ -422,13 +437,15 @@ function renderCalendar() {
   const grid = $("calendarGrid");
   grid.innerHTML = "";
 
+  // meta do calendário (contador)
+  const journeysMeta = $("journeysMeta");
+  if (journeysMeta) journeysMeta.textContent = `Total de journeys: 0`;
+
   const eventsMap = collectEventsForMonth();
   const dates = buildMonthGridDates(state.monthCursor);
 
   const month = state.monthCursor.getMonth();
   const todayKey = dayKeyLocal(new Date());
-
-  let totalVisible = 0;
 
   for (const d of dates) {
     const key = dayKeyLocal(d);
@@ -455,7 +472,6 @@ function renderCalendar() {
     pillsHost.className = "pills";
 
     const entries = (key && eventsMap.get(key)) ? eventsMap.get(key) : [];
-    if (entries.length) totalVisible += entries.length;
 
     const showMax = 3;
     const show = entries.slice(0, showMax);
@@ -499,8 +515,14 @@ function renderCalendar() {
     grid.appendChild(cell);
   }
 
-  $("emptyHint").classList.toggle("hidden", totalVisible > 0);
+  // emptyHint continua baseado no que está visível no mês atual (com filtros/search)
+  $("emptyHint").classList.toggle("hidden", eventsMap.size > 0);
+
+  // contador GLOBAL (ignora mês + filtros + search)
+  const totalAll = countJourneysGlobalAll();
+  if (journeysMeta) journeysMeta.textContent = `Total de journeys: ${totalAll}`;
 }
+
 
 // ---------- Modal content (journey) ----------
 function getChannelCountsForItem(item) {
