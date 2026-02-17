@@ -659,7 +659,7 @@ function renderOffersLists() {
   const renderPill = (host, ofr, borderClass) => {
     const card = document.createElement("div");
 
-    // ✅ FIX: mktscreen NUNCA recebe "always-on" (não marca laranja/verde)
+    // mktscreen nunca marca always-on; aqui é offers mesmo, mas mantemos seguro:
     const isAO =
       ofr?.meta?.alwaysOn === true &&
       String(ofr?.channel || "") !== "mktscreen";
@@ -680,40 +680,62 @@ function renderOffersLists() {
     host.appendChild(card);
   };
 
+  // ----- OFFERS: agora com 3 grupos (Pontuais / Always On / Expiradas) -----
   const offersHost = $("offersList");
   if (offersHost) {
     offersHost.innerHTML = "";
 
-    const active = [];
+    const activePontual = [];
+    const activeAlwaysOn = [];
     const expired = [];
 
     for (const ofr of offers) {
-      if (isOfferExpired(ofr)) expired.push(ofr);
-      else active.push(ofr);
+      if (isOfferExpired(ofr)) {
+        expired.push(ofr);
+        continue;
+      }
+
+      const isAO =
+        ofr?.meta?.alwaysOn === true &&
+        String(ofr?.channel || "") !== "mktscreen";
+
+      if (isAO) activeAlwaysOn.push(ofr);
+      else activePontual.push(ofr);
     }
 
-    active.sort((a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01"));
-    expired.sort((a, b) => new Date(b.endAt || "1900-01-01") - new Date(a.endAt || "1900-01-01"));
+    const byStartAsc = (a, b) => new Date(a.startAt || "2100-01-01") - new Date(b.startAt || "2100-01-01");
+    const byEndDesc = (a, b) => new Date(b.endAt || "1900-01-01") - new Date(a.endAt || "1900-01-01");
 
+    activePontual.sort(byStartAsc);
+    activeAlwaysOn.sort(byStartAsc);
+    expired.sort(byEndDesc);
+
+    // 1) Verdes primeiro
     renderGroupSubtitle(offersHost, "Rodando (hoje)");
-    if (!active.length) {
+    if (!activePontual.length) {
       offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
     } else {
-      for (const ofr of active) {
-        renderPill(offersHost, ofr, offerBorderClass(ofr));
-      }
+      for (const ofr of activePontual) renderPill(offersHost, ofr, offerBorderClass(ofr));
     }
 
+    // 2) Laranjas depois
+    renderGroupSubtitle(offersHost, "Always On");
+    if (!activeAlwaysOn.length) {
+      offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
+    } else {
+      for (const ofr of activeAlwaysOn) renderPill(offersHost, ofr, offerBorderClass(ofr));
+    }
+
+    // 3) Expiradas por último
     renderGroupSubtitle(offersHost, "Já terminou (expiradas)");
     if (!expired.length) {
       offersHost.insertAdjacentHTML("beforeend", `<div class="hint">—</div>`);
     } else {
-      for (const ofr of expired) {
-        renderPill(offersHost, ofr, offerBorderClass(ofr));
-      }
+      for (const ofr of expired) renderPill(offersHost, ofr, offerBorderClass(ofr));
     }
   }
 
+  // ----- MKT SCREEN: neutro como já estava -----
   const mktHost = $("mktList");
   if (mktHost) {
     mktHost.innerHTML = "";
