@@ -31,9 +31,8 @@ body{
   color:var(--text);
 }
 
-/* ===== TOPBAR agora é “header + input” junto ===== */
 .topbar{
-  background: var(--surface-muted); /* cinza */
+  background: var(--surface-muted);
   border-bottom:1px solid var(--border);
   padding:10px 14px;
   display:flex;
@@ -60,7 +59,6 @@ body{
   flex-wrap:wrap;
 }
 
-/* Linha do input dentro do header */
 .topbar-row-input{
   align-items:stretch;
 }
@@ -73,7 +71,6 @@ body{
   font-size:13px;
 }
 
-/* ===== Layout ===== */
 .layout{
   display:flex;
   flex-direction:column;
@@ -82,43 +79,35 @@ body{
 }
 .content{min-height: calc(100vh - 80px);}
 
-/* ===== TOPBAR: botões e input no estilo "transparente" ===== */
-
-/* textarea no topo com mesma cor do fundo (sem branco) */
 .topbar .topbar-textarea{
   background: var(--surface-muted);
   border-color: rgba(17,24,39,.25);
 }
 
-/* Linha do input: NÃO quebrar */
 .topbar-row.topbar-row-input{
-  flex-wrap: nowrap;         /* impede o botão de cair */
+  flex-wrap: nowrap;
   align-items: stretch;
 }
 
-/* Textarea ~2x menor */
 .topbar-row-input .topbar-textarea{
-  min-height: 44px;          /* ajuste fino: 42–48 */
+  min-height: 44px;
   max-height: 160px;
-  width: 100%;               /* ocupa o espaço disponível */
+  width: 100%;
 }
 
-/* Botão acompanha a altura da linha (e não “vence” o CSS antigo) */
 .topbar-row-input #btnParseCreate{
   align-self: flex-start !important;
-  height: 44px !important;      /* mesma altura do textarea “fechado” */
-  flex: 0 0 120px;              /* mantém largura fixa */
-  padding: 0 18px;              /* mantém o visual */
+  height: 44px !important;
+  flex: 0 0 120px;
+  padding: 0 18px;
 }
 
-/* ===== NOVO: botões Exportar/Importar no final, canto direito (não flutuante) ===== */
 .footer-tools{
   margin-top: 14px;
   display: flex;
   justify-content: flex-end;
 }
 
-/* ===== Panels ===== */
 .panel{
   background:var(--panel);
   border:1px solid var(--border);
@@ -146,7 +135,6 @@ body{
   border-top-right-radius: 10px;
 }
 
-/* ===== Inputs ===== */
 .input,.select,.textarea{
   width:100%;
   border:1px solid #d1d5db;
@@ -162,7 +150,6 @@ body{
   resize:vertical;
 }
 
-/* ===== Buttons ===== */
 .btn{
   border:1px solid #d1d5db;
   background: var(--panel2);
@@ -188,7 +175,6 @@ body{
 
 .hidden{display:none}
 
-/* Botão “Adicionar” consistente com altura do input do header */
 #btnParseCreate{
   height: 48px;
   padding: 6px 24px;
@@ -196,7 +182,6 @@ body{
   align-self: flex-start;
 }
 
-/* ===== Calendar ===== */
 .calendar{
   background:var(--panel);
   border:1px solid var(--border);
@@ -291,7 +276,6 @@ body{
   gap:6px;
 }
 
-/* ===== Pills ===== */
 .pill{
   border: 1px solid rgba(17,24,39,.18);
   background: #ffffff;
@@ -307,7 +291,6 @@ body{
   line-height:1.2;
 }
 
-/* status tint */
 .pill.status-active{
   background: rgba(34,197,94,.14);
   border-color: rgba(22,163,74,.45);
@@ -349,7 +332,6 @@ body{
   font-size:12px;
 }
 
-/* ===== Modal (igual ao que você tinha) ===== */
 .modal{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:9999;}
 .modal.hidden{ display:none; }
 .modal-backdrop{position:absolute; inset:0; background:rgba(17,24,39,.35); z-index:0;}
@@ -430,7 +412,6 @@ body{
   opacity:.95;
 }
 
-/* ===== OFFERS / TARGET layout ===== */
 .offers-wrap{
   display:grid;
   grid-template-columns: 1fr 1fr;
@@ -444,8 +425,6 @@ body{
   gap:10px;
 }
 
-/* ===== Agrupadores (Ativas / Always On / Expiradas) =====
-   Sem borda “caixa gigante”. É um header simples + um “bloco” leve de contexto. */
 .list-subtitle{
   font-size:12px;
   font-weight:900;
@@ -457,7 +436,6 @@ body{
   border-radius: 0;
 }
 
-/* “container” do grupo (não tem borda pesada) */
 .list-group{
   background: rgba(255,255,255,.55);
   border-radius: 10px;
@@ -467,10 +445,8 @@ body{
   gap:10px;
 }
 
-/* primeiro grupo com menos respiro */
 .offers-list .list-subtitle:first-child{ margin-top: 4px; }
 
-/* scroll interno */
 #offersList,
 #mktList{
   max-height: 520px;
@@ -478,7 +454,6 @@ body{
   padding-right: 6px;
 }
 
-/* scrollbar discreto */
 #offersList::-webkit-scrollbar,
 #mktList::-webkit-scrollbar{ width: 10px; }
 
@@ -495,7 +470,6 @@ body{
   background: rgba(17,24,39,.06);
 }
 
-/* responsivo */
 @media (max-width: 980px){
   .topbar-textarea{
     width:100%;

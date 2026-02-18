@@ -1,4 +1,4 @@
-// js/utils.js (COMPLETO)
+//utils.js
 export function uuid() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
@@ -20,7 +20,6 @@ export function parseAnyISOish(raw) {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  // yyyy-mm-dd[ T]hh:mm(:ss)
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s*(?:T|\s)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if (m) {
     const y = +m[1], mo = +m[2], d = +m[3];
@@ -34,7 +33,6 @@ export function parseAnyISOish(raw) {
   return null;
 }
 
-// chave local yyyy-mm-dd (sem UTC shift)
 export function dayKeyLocal(dateOrISO) {
   const dt = (dateOrISO instanceof Date) ? dateOrISO : new Date(dateOrISO);
   if (isNaN(dt.getTime())) return null;
@@ -68,7 +66,6 @@ export function addDays(d, n) {
   return dt;
 }
 
-// hash simples e estável (FNV-1a 32-bit) para id de evento/offer
 export function stableHash(str) {
   let h = 0x811c9dc5;
   const s = String(str ?? "");

@@ -1,10 +1,9 @@
-// js/parsers.js (COMPLETO - REGRAS NOVAS)
+//parsers.js
 import { parseAnyISOish, stableHash } from "./utils.js";
 
 const ALLOWED_JOURNEY_CHANNELS = new Set(["push", "email", "whatsapp", "sms"]);
 const ALLOWED_OFFER_CHANNELS = new Set(["inapp", "banner", "mktscreen"]);
 
-// 6 meses "operacional" (não calendário exato). Se quiser mudar p/ 182/184 depois, é aqui.
 const LONG_RUNNING_DAYS_THRESHOLD = 183;
 
 function normalizeChannel(raw) {
@@ -44,9 +43,6 @@ function isLongRunningOffer(startISO, endISO) {
   return d >= LONG_RUNNING_DAYS_THRESHOLD;
 }
 
-/**
- * Header: primeira linha não vazia + primeira URL
- */
 export function parseCardHeader(rawText) {
   const lines = String(rawText || "").split(/\r?\n/);
   let first = "";
@@ -67,11 +63,6 @@ export function parseCardHeader(rawText) {
   return { headerLine: first, cardUrl: url, displayName };
 }
 
-/**
- * Parser Journey (calendário)
- * Regra 1: não descarta se faltar dataInicio (fica editável).
- * Observação: regra de ">= 6 meses" NÃO se aplica a Journey, só Offers (como você pediu).
- */
 export function parseCardChannels(rawText, itemNameForLabels = "") {
   const lines = String(rawText || "")
     .split(/\r?\n/)
@@ -139,7 +130,6 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       ? `${c.channel.toUpperCase()} ${pos} — ${nome}`.trim()
       : `${c.channel.toUpperCase()} ${pos}`.trim();
 
-    // Regra 1: pode ficar vazio (editável no UI)
     const at = c.dataInicio || "";
 
     const evIdSeed = `${itemNameForLabels}|journey|${c.channel}|touch|${at || "NO_DATE"}|${label}|${nome}`;
@@ -155,7 +145,6 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
       meta: {
         posicaoJornada: pos,
         nomeComunicacao: nome,
-        // Sem "alwaysOn" aqui por regra. (Se um dia quiser, a gente cria regra separada p/ Journey.)
         alwaysOn: false
       },
       alias: ""
@@ -168,15 +157,9 @@ export function parseCardChannels(rawText, itemNameForLabels = "") {
     return da - db;
   });
 
-  // "isPontual" aqui fica neutro, porque o que manda pro laranja agora é meta.alwaysOn por item.
   return { isPontual: true, events, channelCounts: counts };
 }
 
-/**
- * Parser OFFERS (InApp/Banner/MktScreen)
- * Regra 1: se faltar start/end -> entra e fica editável; NÃO vira laranja só por isso.
- * Regra 2: se tiver start+end e duração >= 6 meses -> marca alwaysOn=true (laranja).
- */
 export function parseCardOffers(rawText, itemNameForLabels = "") {
   const lines = String(rawText || "")
     .split(/\r?\n/)
@@ -197,7 +180,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     const line = lines[i];
     if (!line) continue;
 
-    // "---------- COMUNICAÇÃO 1 - P0 (BANNER) ----------"
     const comm2 = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+\s*-\s*(P\d+|NA)\s*\(([^)]+)\)/i);
     if (comm2) {
       commit();
@@ -226,7 +208,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
       continue;
     }
 
-    // fallback: cabeçalho sem posição explícita
     const comm = line.match(/^-{2,}\s*COMUNICAÇÃO\s*\d+.*\(([^)]+)\)/i);
     if (comm) {
       commit();
@@ -308,7 +289,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     const startAt = o.startAt || "";
     const endAt = o.endAt || "";
 
-    // Regra 2: laranja só se tiver start+end e durar >= 6 meses
     const alwaysOn = Boolean(startAt && endAt && isLongRunningOffer(startAt, endAt));
     const runningDays = diffDays(startAt, endAt);
 
@@ -318,8 +298,7 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     return {
       id,
       space: "offers",
-      channel: o.channel, // inapp|banner|mktscreen
-      // Regra 1: pode ficar vazio (editável no UI)
+      channel: o.channel,
       startAt,
       endAt,
       name,
@@ -335,7 +314,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     };
   });
 
-  // isPontual agora é derivado: se existir algum offer long-running, o card "não é pontual" pro contexto de monitoramento
   const hasLongRunning = offers.some(o => o?.meta?.alwaysOn);
   return { isPontual: !hasLongRunning, offers };
 }

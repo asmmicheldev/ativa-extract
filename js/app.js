@@ -1,3 +1,4 @@
+/// app.js
 import { dbGetAllItems, dbGetItem, dbPutItem, dbClearAll, dbDeleteItem } from "./db.js";
 import { parseCardHeader, parseCardChannels, parseCardOffers } from "./parsers.js";
 import { uuid, nowISO, dayKeyLocal, startOfMonth, endOfMonth, addDays, clampText } from "./utils.js";
@@ -11,7 +12,6 @@ let state = {
 
 const $ = (id) => document.getElementById(id);
 
-// ---------- Helpers ----------
 function todayStartLocal() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -71,7 +71,6 @@ function escapeHTML(s) {
     .replaceAll("'", "&#039;");
 }
 
-// ---------- ALWAYS-ON: pedir data quando faltar ----------
 function promptStartDateOnly() {
   const v = prompt(
     "Card com canais sem datas.\n\nDigite a DATA DE INÍCIO (YYYY-MM-DD):",
@@ -88,7 +87,6 @@ function isoFromDateOnly(dateOnly, hh = 9, mm = 0) {
   return dt.toISOString();
 }
 
-// ---------- Status por card (journey) ----------
 function computeCardLastAt(item) {
   let max = null;
   for (const ev of (item.events || [])) {
@@ -119,7 +117,6 @@ function statusClass(status) {
   return "status-active";
 }
 
-// ---------- Status por offer ----------
 function isOfferExpired(ofr) {
   if (String(ofr?.channel || "") === "mktscreen") return false;
 
@@ -137,7 +134,6 @@ function offerBorderClass(ofr) {
   return isOfferExpired(ofr) ? "status-disabled" : "status-active";
 }
 
-// ---------- Modal state ----------
 let modalBound = false;
 let currentModalEvent = null;
 let aliasDirty = false;
@@ -333,12 +329,10 @@ function closeModal() {
   }
 }
 
-// ---------- Calendar ----------
 function monthLabel(d) {
   return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
 
-// sem filtros agora: só valida que é journey e canal permitido
 function passesFilters(ev) {
   if (ev.space !== "journey") return false;
   if (!ALLOWED_JOURNEY_CHANNELS.has(String(ev.channel || ""))) return false;
@@ -504,7 +498,6 @@ function renderCalendar() {
   if (journeysTitle) journeysTitle.textContent = `Journeys (${totalAll})`;
 }
 
-// ---------- Modal content (journey) ----------
 function getChannelCountsForItem(item) {
   const cc = item?.channelCounts || {};
   const pairs = [
@@ -590,7 +583,6 @@ function openDayModal(dayKey, entries) {
   });
 }
 
-// ---------- OFFERS + MKTSCREEN ----------
 function inferPosFromText(s) {
   const m = String(s || "").match(/\b(P\d+)\b/i);
   return m ? m[1].toUpperCase() : "NA";
@@ -751,7 +743,6 @@ function openOfferModal(ofr) {
   openModalBase(cardFull, bodyHTML);
 }
 
-// ---------- Data / actions ----------
 async function refresh() {
   state.items = await dbGetAllItems();
   renderCalendar();
@@ -879,7 +870,6 @@ function gotoToday() {
   renderCalendar();
 }
 
-// ---------- Export / Import ----------
 const EXPORT_MAGIC = "ativas-extract";
 const EXPORT_SCHEMA = 2;
 
@@ -1162,7 +1152,6 @@ async function importBackupFromFile(file) {
   await importBackupFromText(text);
 }
 
-// ---------- Bindings ----------
 $("btnParseCreate").addEventListener("click", createFromCard);
 
 $("btnPrev").addEventListener("click", () => shiftMonth(-1));
@@ -1184,7 +1173,6 @@ $("fileImport")?.addEventListener("change", async (e) => {
   await importBackupFromFile(file);
 });
 
-// init
 bindModalOnce();
 await refresh();
 gotoToday();
