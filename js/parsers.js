@@ -289,7 +289,15 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     const startAt = o.startAt || "";
     const endAt = o.endAt || "";
 
-    const alwaysOn = Boolean(startAt && endAt && isLongRunningOffer(startAt, endAt));
+    const alwaysOnNoEnd =
+      String(o.channel || "") !== "mktscreen" &&
+      !String(endAt || "").trim();
+
+    const alwaysOnLong =
+      Boolean(startAt && endAt && isLongRunningOffer(startAt, endAt));
+
+    const alwaysOn = alwaysOnNoEnd || alwaysOnLong;
+
     const runningDays = diffDays(startAt, endAt);
 
     const idSeed = `${itemNameForLabels}|offers|${o.channel}|${o.posicaoJornada || ""}|${startAt || ""}|${endAt || ""}|${labelBase}|${o.deeplink || ""}|${o.blocksCount || 0}`;
@@ -307,6 +315,7 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
         posicaoJornada: (o.posicaoJornada || "").trim(),
         rawChannel: o.rawChannel || "",
         blocksCount: Number(o.blocksCount ?? 0) || 0,
+        deeeplink: o.deeplink || "",
         deeplink: o.deeplink || "",
         alwaysOn,
         runningDays: Number.isFinite(runningDays) ? runningDays : null
@@ -314,6 +323,6 @@ export function parseCardOffers(rawText, itemNameForLabels = "") {
     };
   });
 
-  const hasLongRunning = offers.some(o => o?.meta?.alwaysOn);
-  return { isPontual: !hasLongRunning, offers };
+  const hasAlwaysOn = offers.some(o => o?.meta?.alwaysOn === true);
+  return { isPontual: !hasAlwaysOn, offers };
 }
