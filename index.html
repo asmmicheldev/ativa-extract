@@ -8,43 +8,36 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <div class="brand-title">Ativas Extract</div>
+    <!-- Linha 1: título à esquerda (REMOVIDO export/import daqui) -->
+    <div class="topbar-row">
+      <div class="brand">
+        <div class="brand-title">Ativas Extract</div>
+      </div>
     </div>
 
-    <div class="topbar-actions">
-      <div class="tools">
-        <!-- REMOVIDO: Apagar tudo (local) -->
-        <button id="btnExport" class="btn btn-secondary" type="button">Exportar</button>
-        <button id="btnImport" class="btn btn-secondary" type="button">Importar</button>
-        <input id="fileImport" type="file" accept="application/json" class="hidden" />
-      </div>
-
-      <div class="month-nav">
-        <button id="btnPrev" class="btn btn-secondary" type="button">←</button>
-        <button id="btnToday" class="btn" type="button">Hoje</button>
-        <button id="btnNext" class="btn btn-secondary" type="button">→</button>
-      </div>
-
-      <div id="monthLabel" class="month-label"></div>
+    <!-- Linha 2: input + botão “Adicionar” dentro do header (sem bloco avulso) -->
+    <div class="topbar-row topbar-row-input">
+      <textarea id="inputCard" class="textarea topbar-textarea" placeholder=""></textarea>
+      <button id="btnParseCreate" class="btn btn-secondary" type="button">Adicionar</button>
     </div>
   </header>
 
   <main class="layout">
-    <!-- CARD BAR (entre header e calendário) -->
-    <section class="cardbar panel">
-      <div class="cardbar-row">
-        <!-- placeholder removido -->
-        <textarea id="inputCard" class="textarea cardbar-textarea"></textarea>
-        <!-- label trocado -->
-        <button id="btnParseCreate" class="btn btn-secondary" type="button">Adicionar</button>
-      </div>
-    </section>
-
     <section class="content">
       <div class="calendar">
-        <!-- título agora dinâmico -->
-        <div id="journeysTitle" class="panel-title">Journeys (0)</div>
+        <div class="calendar-top panel-title">
+          <div id="journeysTitle" class="calendar-title">Journeys (0)</div>
+
+          <div class="calendar-controls">
+            <div class="month-nav">
+              <button id="btnPrev" class="btn btn-secondary" type="button">←</button>
+              <button id="btnToday" class="btn" type="button">Hoje</button>
+              <button id="btnNext" class="btn btn-secondary" type="button">→</button>
+            </div>
+
+            <div id="monthLabel" class="month-label"></div>
+          </div>
+        </div>
 
         <div class="calendar-head">
           <div class="dow">Domingo</div>
@@ -64,16 +57,23 @@
       </div>
 
       <div class="offers-wrap">
-        <div class="panel">
-          <!-- título agora dinâmico -->
+        <div class="panel panel-muted">
           <div id="offersTitle" class="panel-title">Offers (0)</div>
           <div id="offersList" class="offers-list"></div>
         </div>
 
-        <div class="panel">
-          <!-- título agora dinâmico -->
+        <div class="panel panel-muted">
           <div id="mktTitle" class="panel-title">Target (0)</div>
           <div id="mktList" class="offers-list"></div>
+        </div>
+      </div>
+
+      <!-- NOVO: botões no final da página, canto direito (NÃO flutuante) -->
+      <div class="footer-tools">
+        <div class="tools">
+          <button id="btnExport" class="btn btn-secondary" type="button">Exportar</button>
+          <button id="btnImport" class="btn btn-secondary" type="button">Importar</button>
+          <input id="fileImport" type="file" accept="application/json" class="hidden" />
         </div>
       </div>
     </section>

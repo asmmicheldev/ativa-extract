@@ -1,17 +1,26 @@
 :root{
-  --bg:#0b0f1a;
-  --panel:#0f1626;
-  --panel2:#0b1220;
-  --muted:#9aa4b2;
-  --text:#e5e7eb;
-  --border:#243047;
-  --shadow:0 0 14px rgba(0,0,0,.35);
-  --accent:#7c3aed;
-  --danger:#b91c1c;
+  --bg:#f5f5f7;
+  --panel:#ffffff;
+  --panel2:#f9fafb;
+  --muted:#6b7280;
+  --text:#111827;
+  --border:#d4d4dd;
+  --shadow:0 0 8px rgba(15, 23, 42, 0.08);
 
-  --ok:#16a34a;
+  --accent:#e11d48;
+  --accent-strong:#be123c;
+  --accent-soft:#fee2e2;
+
+  --danger:#b91c1c;
+  --ok:#166534;
   --warn:#ef4444;
   --disabled:#6b7280;
+
+  --header-bg: #eceff3;
+  --day-bg: #f3f4f6;
+  --day-bg-outside: #e9edf2;
+
+  --surface-muted: var(--day-bg);
 }
 
 *{box-sizing:border-box}
@@ -22,24 +31,26 @@ body{
   color:var(--text);
 }
 
+/* ===== TOPBAR agora é “header + input” junto ===== */
 .topbar{
+  background: var(--surface-muted); /* cinza */
+  border-bottom:1px solid var(--border);
+  padding:10px 14px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.topbar-row{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:12px;
-  padding:10px 14px;
-  background:var(--panel);
-  border-bottom:1px solid var(--border);
+  flex-wrap:wrap;
 }
 
-.brand-title{font-weight:700}
-
-.topbar-actions{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  flex-wrap:wrap;
-  justify-content:flex-end;
+.brand-title{
+  font-weight:700;
 }
 
 .tools{
@@ -49,56 +60,100 @@ body{
   flex-wrap:wrap;
 }
 
-.month-nav{display:flex;gap:8px;align-items:center}
-.month-label{
-  font-weight:700;
-  color:var(--text);
-  min-width: 180px;
-  text-align:right;
+/* Linha do input dentro do header */
+.topbar-row-input{
+  align-items:stretch;
 }
 
+.topbar-textarea{
+  width: min(980px, calc(100vw - 220px));
+  min-height:48px;
+  max-height:240px;
+  resize: vertical;
+  font-size:13px;
+}
+
+/* ===== Layout ===== */
 .layout{
   display:flex;
   flex-direction:column;
   gap:14px;
   padding:14px;
 }
-
 .content{min-height: calc(100vh - 80px);}
 
+/* ===== TOPBAR: botões e input no estilo "transparente" ===== */
+
+/* textarea no topo com mesma cor do fundo (sem branco) */
+.topbar .topbar-textarea{
+  background: var(--surface-muted);
+  border-color: rgba(17,24,39,.25);
+}
+
+/* Linha do input: NÃO quebrar */
+.topbar-row.topbar-row-input{
+  flex-wrap: nowrap;         /* impede o botão de cair */
+  align-items: stretch;
+}
+
+/* Textarea ~2x menor */
+.topbar-row-input .topbar-textarea{
+  min-height: 44px;          /* ajuste fino: 42–48 */
+  max-height: 160px;
+  width: 100%;               /* ocupa o espaço disponível */
+}
+
+/* Botão acompanha a altura da linha (e não “vence” o CSS antigo) */
+.topbar-row-input #btnParseCreate{
+  align-self: flex-start !important;
+  height: 44px !important;      /* mesma altura do textarea “fechado” */
+  flex: 0 0 120px;              /* mantém largura fixa */
+  padding: 0 18px;              /* mantém o visual */
+}
+
+/* ===== NOVO: botões Exportar/Importar no final, canto direito (não flutuante) ===== */
+.footer-tools{
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ===== Panels ===== */
 .panel{
   background:var(--panel);
   border:1px solid var(--border);
   border-radius:10px;
   box-shadow:var(--shadow);
-  padding: 0;            /* header controla o topo */
-  overflow: hidden;      /* garante radius no header */
+  padding: 0;
+  overflow: hidden;
 }
 
-/* conteúdo interno dos panels (tudo menos o título) */
+.panel.panel-muted{
+  background: var(--surface-muted);
+}
+
 .panel > :not(.panel-title){
   padding: 12px;
 }
 
-
 .panel-title{
   font-weight:700;
-  margin: 0;                       /* evita margin collapse */
-  padding: 12px 12px 10px;         /* vira um header */
-  background: #0c1322;
+  margin: 0;
+  padding: 12px 12px 10px;
+  background: var(--header-bg);
   border-bottom: 1px solid var(--border);
   border-top-left-radius: 10px;
   border-top-right-radius: 10px;
 }
 
-
+/* ===== Inputs ===== */
 .input,.select,.textarea{
   width:100%;
-  border:1px solid var(--border);
+  border:1px solid #d1d5db;
   border-radius:8px;
   padding:8px 10px;
   font-size:13px;
-  background:var(--panel2);
+  background: #ffffff;
   color:var(--text);
 }
 
@@ -107,27 +162,24 @@ body{
   resize:vertical;
 }
 
+/* ===== Buttons ===== */
 .btn{
-  border:1px solid var(--border);
-  background:var(--panel2);
-  color:var(--text);
+  border:1px solid #d1d5db;
+  background: var(--panel2);
+  color: var(--text);
   padding:8px 10px;
   border-radius:8px;
   cursor:pointer;
   font-size:12px;
   white-space:nowrap;
 }
-.btn:hover{filter:brightness(1.08)}
-.btn-primary{
-  border-color:var(--accent);
-  background:var(--accent);
-  color:#fff;
-}
+.btn:hover{filter:brightness(0.98)}
 .btn-secondary{
-  background:#1f2937;
-  border-color:#334155;
+  background: #111827;
+  border-color: #111827;
   color:#fff;
 }
+.btn-secondary:hover{filter:brightness(1.05)}
 .btn-danger{
   background:var(--danger);
   border-color:var(--danger);
@@ -136,23 +188,15 @@ body{
 
 .hidden{display:none}
 
-/* CARD BAR */
-.cardbar{
-  padding:12px;
-}
-.cardbar-row{
-  display:flex;
-  gap:10px;
-  align-items:stretch;
-}
-.cardbar-textarea{
-  min-height:96px;
-}
-.cardbar-btn{
-  width:220px;
+/* Botão “Adicionar” consistente com altura do input do header */
+#btnParseCreate{
+  height: 48px;
+  padding: 6px 24px;
+  font-size: 12px;
+  align-self: flex-start;
 }
 
-/* Calendar */
+/* ===== Calendar ===== */
 .calendar{
   background:var(--panel);
   border:1px solid var(--border);
@@ -161,13 +205,38 @@ body{
   overflow:hidden;
 }
 
+.calendar-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.calendar-title{font-weight:800}
+
+.calendar-controls{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  flex-direction: row-reverse; 
+}
+
+.month-nav{display:flex;gap:8px;align-items:center}
+.month-label{
+  font-weight:800;
+  color:var(--text);
+  min-width: 180px;
+  text-align:right;
+}
+
 .calendar-head{
   display:grid;
   grid-template-columns: repeat(7, 1fr);
   border-bottom:1px solid var(--border);
-  background: #0c1322;
+  background: var(--header-bg);
 }
-
 
 .dow{
   padding:10px 10px;
@@ -188,16 +257,18 @@ body{
   border-right:1px solid var(--border);
   border-bottom:1px solid var(--border);
   padding:8px;
-  background: #0b1220;
+  background: var(--day-bg);
   position:relative;
 }
 .day:nth-child(7n){border-right:none}
+
 .day.outside{
-  background:#0a1020;
-  opacity:.55;
+  background: var(--day-bg-outside);
+  opacity:.70;
 }
+
 .day.today{
-  outline:2px solid rgba(124,58,237,.6);
+  outline:2px solid rgba(225,29,72,.45);
   outline-offset:-2px;
 }
 
@@ -210,7 +281,7 @@ body{
   justify-content:space-between;
 }
 .day-num .dot{
-  width:8px;height:8px;border-radius:999px;background:rgba(124,58,237,.8);
+  width:8px;height:8px;border-radius:999px;background:rgba(225,29,72,.85);
 }
 
 .pills{
@@ -220,48 +291,49 @@ body{
   gap:6px;
 }
 
-/* pills */
+/* ===== Pills ===== */
 .pill{
-  border:1px solid rgba(124,58,237,.55);
-  background:#0c1426;
+  border: 1px solid rgba(17,24,39,.18);
+  background: #ffffff;
   border-radius:7px;
   padding:6px 8px;
   cursor:pointer;
 }
-.pill:hover{filter:brightness(1.12)}
+.pill:hover{filter:brightness(0.985)}
 .pill .t1{
   font-size:11px;
   font-weight:800;
-  color:#e2e8f0;
+  color:#111827;
   line-height:1.2;
 }
 
 /* status tint */
 .pill.status-active{
-  border-color: rgba(22,163,74,.7);
-  box-shadow: 0 0 0 1px rgba(22,163,74,.15) inset;
+  background: rgba(34,197,94,.14);
+  border-color: rgba(22,163,74,.45);
+  box-shadow: 0 0 0 1px rgba(22,163,74,.10) inset;
 }
 .pill.status-expired{
-  border-color: rgba(239,68,68,.75);
-  box-shadow: 0 0 0 1px rgba(239,68,68,.18) inset;
+  background: rgba(239,68,68,.14);
+  border-color: rgba(239,68,68,.45);
+  box-shadow: 0 0 0 1px rgba(239,68,68,.10) inset;
 }
 .pill.status-disabled{
-  border-color: rgba(107,114,128,.65);
-  box-shadow: 0 0 0 1px rgba(107,114,128,.18) inset;
-  opacity:.75;
+  background: rgba(107,114,128,.12);
+  border-color: rgba(107,114,128,.40);
+  box-shadow: 0 0 0 1px rgba(107,114,128,.08) inset;
+  opacity:.85;
 }
-
-/* neutro (Target/MktScreen) */
 .pill.status-neutral{
-  border-color: rgba(255,255,255,.14);
-  box-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
-  opacity:.92;
+  background: rgba(17,24,39,.06);
+  border-color: rgba(17,24,39,.16);
+  box-shadow: 0 0 0 1px rgba(17,24,39,.05) inset;
+  opacity:.96;
 }
-
-/* ALWAYS-ON visual */
 .pill.always-on{
-  border-color: rgba(249,115,22,.85) !important;
-  box-shadow: 0 0 0 1px rgba(249,115,22,.14) inset;
+  background: rgba(249,115,22,.16) !important;
+  border-color: rgba(249,115,22,.55) !important;
+  box-shadow: 0 0 0 1px rgba(249,115,22,.10) inset;
 }
 
 .more{
@@ -277,10 +349,10 @@ body{
   font-size:12px;
 }
 
-/* Modal */
+/* ===== Modal (igual ao que você tinha) ===== */
 .modal{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:9999;}
 .modal.hidden{ display:none; }
-.modal-backdrop{position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:0;}
+.modal-backdrop{position:absolute; inset:0; background:rgba(17,24,39,.35); z-index:0;}
 .modal-card{
   position:relative;
   z-index:1;
@@ -300,10 +372,11 @@ body{
   margin-bottom:8px;
   font-size:16px;
   outline:none;
-  border:1px solid rgba(255,255,255,.06);
+  border:1px solid rgba(17,24,39,.12);
   border-radius:10px;
   padding:8px 10px;
-  background:rgba(255,255,255,.02);
+  background: var(--panel2);
+  color: var(--text);
 }
 
 .save-row{display:flex; justify-content:flex-end; gap:8px; margin:-4px 0 10px;}
@@ -312,13 +385,13 @@ body{
   color:var(--muted);
   padding:2px 8px;
   border-radius:999px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.03);
+  border:1px solid rgba(17,24,39,.12);
+  background: rgba(17,24,39,.03);
 }
 .save-badge.ok{
-  color:#d1fae5;
-  border-color: rgba(22,163,74,.35);
-  background: rgba(22,163,74,.10);
+  color:#065f46;
+  border-color: rgba(34,197,94,.35);
+  background: rgba(34,197,94,.12);
 }
 
 .modal-body{
@@ -352,24 +425,17 @@ body{
 }
 .day-pill .t3{
   font-size:11px;
-  color:#cbd5e1;
+  color:#374151;
   margin-top:2px;
   opacity:.95;
 }
 
-/* OFFERS area */
+/* ===== OFFERS / TARGET layout ===== */
 .offers-wrap{
   display:grid;
   grid-template-columns: 1fr 1fr;
   gap:14px;
   margin-top:14px;
-}
-
-.offers-meta{
-  font-size:12px;
-  color:var(--muted);
-  margin-top:-4px;
-  margin-bottom:10px;
 }
 
 .offers-list{
@@ -378,33 +444,33 @@ body{
   gap:10px;
 }
 
-/* responsivo simples */
-@media (max-width: 980px){
-  .cardbar-row{flex-direction:column;}
-  .cardbar-btn{width:100%;}
-  .month-label{min-width:auto;}
-  .offers-wrap{grid-template-columns:1fr;}
+/* ===== Agrupadores (Ativas / Always On / Expiradas) =====
+   Sem borda “caixa gigante”. É um header simples + um “bloco” leve de contexto. */
+.list-subtitle{
+  font-size:12px;
+  font-weight:900;
+  color: var(--text);
+  margin: 14px 0 8px;
+  padding: 2px 2px 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
-/* ---------- TOP: Card (textarea + botão) menores ---------- */
-
-/* input (textarea) com a MESMA altura do botão */
-#inputCard{
-  min-height: 48px;
-  max-height: 480px;
-  resize: vertical;
-  font-size: 13px;
+/* “container” do grupo (não tem borda pesada) */
+.list-group{
+  background: rgba(255,255,255,.55);
+  border-radius: 10px;
+  padding: 10px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 
-/* botão um pouco menor */
-#btnParseCreate{
-  height: 48px;
-  padding: 6px 24px;
-  font-size: 12px;
-  align-self: flex-start;
-}
+/* primeiro grupo com menos respiro */
+.offers-list .list-subtitle:first-child{ margin-top: 4px; }
 
-/* ---------- OFFERS / MKT: lista com scroll interno ---------- */
+/* scroll interno */
 #offersList,
 #mktList{
   max-height: 520px;
@@ -412,19 +478,27 @@ body{
   padding-right: 6px;
 }
 
-/* opcional: scrollbar mais discreto (Chrome/Edge) */
+/* scrollbar discreto */
 #offersList::-webkit-scrollbar,
-#mktList::-webkit-scrollbar{
-  width: 10px;
-}
+#mktList::-webkit-scrollbar{ width: 10px; }
+
 #offersList::-webkit-scrollbar-thumb,
 #mktList::-webkit-scrollbar-thumb{
-  background: rgba(255,255,255,.10);
+  background: rgba(17,24,39,.18);
   border-radius: 999px;
   border: 2px solid rgba(0,0,0,0);
   background-clip: padding-box;
 }
+
 #offersList::-webkit-scrollbar-track,
 #mktList::-webkit-scrollbar-track{
-  background: rgba(255,255,255,.03);
+  background: rgba(17,24,39,.06);
+}
+
+/* responsivo */
+@media (max-width: 980px){
+  .topbar-textarea{
+    width:100%;
+  }
+  .offers-wrap{grid-template-columns:1fr;}
 }
